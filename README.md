@@ -5,7 +5,7 @@ Workflow and tooling for generating spinodoid unit cells, tiling them into large
 ## MATLAB generators
 
 - `Matlab/main.m` – entry point for creating a single periodic spinodoid cell (cubes).
-- `Matlab/tile_spinodoid.m` – tiles the cube along X/Y/Z to create multi-cell lattices.
+- `Matlab/tile_spinodoid.m` – tiles the cube along X/Y/Z to create multi-cell lattices, fusing seam slices so adjacent tiles share material with no gaps; each run writes an STL+log under `Matlab/results/tiled/...`.
 - `Matlab/make_spinodoid_sheet.m` – dense base slab + closed spinodoid layer (panel studies).
 - `Matlab/make_spinodoid_relief_sheet.m` – plate with a constant-thickness spinodoid “carpet”.
 - `Matlab/make_spinodoid_stent.m` – wraps the field onto a cylindrical shell for individual stents.

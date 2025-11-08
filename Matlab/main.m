@@ -6,7 +6,7 @@ lambda_vox   = 32;         % target feature wavelength in voxels (~rib/ligament 
 bandwidth    = 0.50;       % relative shell thickness around target |k| (0.1–0.3)
 nModes       = 4000;       % number of Fourier modes to sample (1k–10k typical)
 solid_frac   = 0.5;        % volume fraction of SOLID after threshold (0..1)
-coneDeg      = [90 90 90]; % cone half-angles about x,y,z (90= isotropic). e.g. [25 90 90]
+coneDeg      = [30 0 0]; % cone half-angles about x,y,z (90= isotropic). e.g. [25 90 90]
 rngSeed      = 1;          % reproducible
 rng(rngSeed);
 scriptDir    = fileparts(mfilename('fullpath'));

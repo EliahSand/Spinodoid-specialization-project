@@ -3,7 +3,7 @@
 This folder contains several MATLAB generators tailored for periodic spinodoids:
 
 - `main.m` (single cell) – produces one periodic spinodal microstructure suitable for additive manufacturing, finite element homogenization, and metamaterial design.  
-- `tile_spinodoid.m` (multi-cell tiler) – reuses the single-cell recipe, tiles it along X/Y/Z, and exports a much larger seamless lattice with its own run log.  
+- `tile_spinodoid.m` (multi-cell tiler) – reuses the single-cell recipe, tiles it along X/Y/Z, fuses adjacent seam slices to avoid gaps, and exports a much larger seamless lattice with its own run log.  
 - `make_spinodoid_sheet.m` – stacks a dense base slab with a closed spinodoid layer cut from the same periodic field (good for panel studies).  
 - `make_spinodoid_relief_sheet.m` – fuses a homogeneous plate with a constant-thickness spinodoid “carpet” extruded from a 2D slice, matching the periodic-with-plate style reference.
 - `make_spinodoid_stent.m` – wraps the periodic spinodal field onto a cylindrical shell (Ri/Ro/H) to export a watertight single stent using the same padding/wrapping workflow as the reference stent generator.

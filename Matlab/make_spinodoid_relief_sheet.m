@@ -22,7 +22,7 @@ cfg.sigma_vox    = 0.0;        % optional Gaussian blur strength
 
 cfg.t_spin       = 2.0e-3;     % spinodoid relief thickness [m]
 cfg.t_base       = 1.5e-3;     % dense base thickness [m]
-cfg.tilesXY      = [1 1];      % tiling in X/Y
+cfg.tilesXY      = [3 3];      % tiling in X/Y
 cfg.add_outer_skin_vox = 0;    % perimeter sealing on the whole sheet
 cfg.slice_count  = 4;          % number of top slices to average for 2D driver
 
