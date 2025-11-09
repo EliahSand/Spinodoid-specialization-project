@@ -101,6 +101,7 @@ fprintf('Wrote file to: %s\n', stlPath);
 
 logPath = fullfile(runDir, 'run_log.txt');
 timestampStr = datestr(runTimestamp, 'dd-mmm-yyyy HH:MM:SS');
+elapsedSeconds = toc(tStart);
 
 paramLines = {
     sprintf('  grid: %d', N)
@@ -143,6 +144,12 @@ logLines = [
     'Field metadata:'
     } ;
     fieldMetaLines
+    {
+    ''
+    'Runtime:'
+    sprintf('  elapsed_seconds: %.2f', elapsedSeconds)
+    sprintf('  elapsed_minutes: %.2f', elapsedSeconds/60)
+    }
     ];
 
 fid = fopen(logPath, 'w');
@@ -166,10 +173,9 @@ fprintf('STL: %s\n', stlPath);
 fprintf('Faces: %d, Vertices: %d\n', meshStats.numFaces, meshStats.numVertices);
 fprintf('Cone degrees: [%s]\n', num2str(coneDeg));
 fprintf('----------------------\n\n');
-elapsed = toc(tStart);
-if elapsed < 60
-    fprintf('Run completed in %.2f seconds.\n', elapsed);
+if elapsedSeconds < 60
+    fprintf('Run completed in %.2f seconds.\n', elapsedSeconds);
 else
-    fprintf('Run completed in %.2f minutes.\n', elapsed/60);
+    fprintf('Run completed in %.2f minutes.\n', elapsedSeconds/60);
 end
 end

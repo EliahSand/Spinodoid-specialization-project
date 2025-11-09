@@ -122,6 +122,7 @@ fprintf('Wrote STL: %s\n', stlPath);
 % Run log
 logPath = fullfile(runDir, 'run_log.txt');
 timestampStr = datestr(runTimestamp, 'dd-mmm-yyyy HH:MM:SS');
+elapsedSeconds = toc(tStart);
 
 paramLines = {
     sprintf('  grid: %d', N)
@@ -163,6 +164,12 @@ logLines = [
     'Tiling & threshold:'
     } ;
     tileLines
+    {
+    ''
+    'Runtime:'
+    sprintf('  elapsed_seconds: %.2f', elapsedSeconds)
+    sprintf('  elapsed_minutes: %.2f', elapsedSeconds/60)
+    }
     ];
 
 fid = fopen(logPath, 'w');
@@ -186,10 +193,9 @@ fprintf('Solid fraction (target / cell@t / tiled): %.3f / %.3f / %.3f\n', ...
 fprintf('Tiles: %dx%dx%d, voxelSize: %.6f, STL: %s\n', tx, ty, tz, voxelSize, stlPath);
 fprintf('Faces: %d, Vertices: %d\n', meshStats.numFaces, meshStats.numVertices);
 fprintf('----------------------\n\n');
-elapsed = toc(tStart);
-if elapsed < 60
-    fprintf('Run completed in %.2f seconds.\n', elapsed);
+if elapsedSeconds < 60
+    fprintf('Run completed in %.2f seconds.\n', elapsedSeconds);
 else
-    fprintf('Run completed in %.2f minutes.\n', elapsed/60);
+    fprintf('Run completed in %.2f minutes.\n', elapsedSeconds/60);
 end
 end
