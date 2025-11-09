@@ -1,4 +1,5 @@
 function tile_spinodoid()
+tStart = tic;
 % Multi-cell spinodoid generator (periodic & seam-free)
 % Pipeline:
 % 1) Generate one periodic scalar field phi via cosine-mode synthesis
@@ -8,12 +9,12 @@ function tile_spinodoid()
 
 %% -------------------- Design knobs -------------------------------------
 N            = 128;        % grid size of the base cell (NxNxN)
-L            = 0.50;       % physical box length of one cell (arbitrary units)
+L            = 0.30;       % physical box length of one cell (arbitrary units)
 lambda_vox   = 32;         % target feature wavelength (in voxels)
 bandwidth    = 0.30;       % spectral shell thickness (0.1–0.3)
 nModes       = 4000;       % number of Fourier modes
 solid_frac   = 0.50;       % SOLID volume fraction after threshold (0..1)
-coneDeg      = [30 0 0]; % cone half-angles; [90 90 90] = isotropic
+coneDeg      = [90 90 90]; % cone half-angles; [90 90 90] = isotropic
 rngSeed      = 1;          % reproducible seed
 
 % Optional smoothing of phi BEFORE threshold (still periodic)
@@ -185,4 +186,10 @@ fprintf('Solid fraction (target / cell@t / tiled): %.3f / %.3f / %.3f\n', ...
 fprintf('Tiles: %dx%dx%d, voxelSize: %.6f, STL: %s\n', tx, ty, tz, voxelSize, stlPath);
 fprintf('Faces: %d, Vertices: %d\n', meshStats.numFaces, meshStats.numVertices);
 fprintf('----------------------\n\n');
+elapsed = toc(tStart);
+if elapsed < 60
+    fprintf('Run completed in %.2f seconds.\n', elapsed);
+else
+    fprintf('Run completed in %.2f minutes.\n', elapsed/60);
+end
 end

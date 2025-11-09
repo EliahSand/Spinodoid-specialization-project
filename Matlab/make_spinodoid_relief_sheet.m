@@ -1,4 +1,5 @@
 function make_spinodoid_relief_sheet(params)
+tStart = tic;
 %MAKE_SPINODOID_RELIEF_SHEET Solid slab + extruded spinodoid relief.
 %   Bottom: dense homogeneous slab (thickness t_base)
 %   Top   : constant-thickness spinodoid "carpet" extruded from a 2D slice
@@ -12,7 +13,7 @@ end
 %% -------------------- Design knobs (with defaults) ---------------------
 cfg.N            = 128;        % grid size per base cell
 cfg.L            = 10e-3;      % physical cell size [m]
-cfg.lambda_vox   = 50;
+cfg.lambda_vox   = 40;
 cfg.bandwidth    = 0.22;
 cfg.nModes       = 4000;
 cfg.solid_frac   = 0.50;
@@ -22,9 +23,9 @@ cfg.sigma_vox    = 0.0;        % optional Gaussian blur strength
 
 cfg.t_spin       = 2.0e-3;     % spinodoid relief thickness [m]
 cfg.t_base       = 1.5e-3;     % dense base thickness [m]
-cfg.tilesXY      = [3 3];      % tiling in X/Y
+cfg.tilesXY      = [1 1];      % tiling in X/Y
 cfg.add_outer_skin_vox = 0;    % perimeter sealing on the whole sheet
-cfg.slice_count  = 4;          % number of top slices to average for 2D driver
+cfg.slice_count  = 10;          % number of top slices to average for 2D driver
 
 fields = fieldnames(cfg);
 for i = 1:numel(fields)
@@ -213,4 +214,10 @@ fprintf('Solid fraction (target / cell / sheet): %.3f / %.3f / %.3f\n', ...
 fprintf('Tiles: %dx%d, STL: %s\n', tx, ty, stlPath);
 fprintf('Faces: %d, Vertices: %d\n', meshStats.numFaces, meshStats.numVertices);
 fprintf('----------------------\n\n');
+elapsed = toc(tStart);
+if elapsed < 60
+    fprintf('Run completed in %.2f seconds.\n', elapsed);
+else
+    fprintf('Run completed in %.2f minutes.\n', elapsed/60);
+end
 end

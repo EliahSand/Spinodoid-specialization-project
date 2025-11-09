@@ -1,4 +1,5 @@
 function make_spinodoid_sheet()
+tStart = tic;
 % Two-layer sheet that shares the same field-generation pipeline as main.m:
 % - Generate a periodic spinodoid cell via cosine-mode synthesis
 % - Use the top tsV slices as the porous layer
@@ -168,4 +169,10 @@ fprintf('Solid fraction (target / cell / sheet): %.3f / %.3f / %.3f\n', ...
 fprintf('Tiles: %dx%d, STL: %s\n', tx, ty, stlPath);
 fprintf('Faces: %d, Vertices: %d\n', meshStats.numFaces, meshStats.numVertices);
 fprintf('----------------------\n\n');
+elapsed = toc(tStart);
+if elapsed < 60
+    fprintf('Run completed in %.2f seconds.\n', elapsed);
+else
+    fprintf('Run completed in %.2f minutes.\n', elapsed/60);
+end
 end

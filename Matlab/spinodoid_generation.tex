@@ -1,0 +1,141 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{geometry}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{bm}
+\usepackage{microtype}
+\usepackage{hyperref}
+\usepackage{siunitx}
+\usepackage{mathtools}
+\usepackage{enumitem}
+\geometry{margin=1in}
+
+\title{Spinodoid Geometry Generation via Periodic Fourier Synthesis\\\large A Code-Oriented Derivation and Practical Guide}
+\author{Project Notes}
+\date{\today}
+
+% -- Shortcuts --
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\Z}{\mathbb{Z}}
+\newcommand{\vx}{\bm{x}}
+\newcommand{\vk}{\bm{k}}
+\newcommand{\vK}{\bm{K}}
+\newcommand{\vL}{\bm{L}}
+\newcommand{\vone}{\bm{1}}
+\newcommand{\T}{\mathbb{T}}
+
+\begin{document}
+\maketitle
+
+\section{Overview}
+The core geometry in this repository is a \emph{spinodoid}---a triply periodic, bicontinuous structure mimicking morphologies arising in spinodal decomposition. The main idea is simple and powerful: synthesize a \emph{periodic Gaussian random field} by summing a band-limited set of discrete Fourier modes on a 3D torus, then threshold it to obtain a binary solid/void phase. Periodicity is guaranteed by construction, so opposite faces of the design cell match in both value and gradient, enabling robust tiling and clean periodic boundary conditions (PBCs) for mechanical simulations.
+
+Concretely, the MATLAB implementation lives in \texttt{Matlab/helpers/spinodal\_periodic\_field.m} and is used from the (copied) experimental driver \texttt{exp/main\_spinodoid\_mesher.m}. This note derives the math, explains each parameter knob, and relates the equations to the code.
+
+\section{Periodic Field on a 3D Torus}
+Let the design domain be a cube of physical side length $L>0$, parameterized by $\vx=(x,y,z)\in[0,L]^3$. We represent a stationary, periodic scalar field $\phi: [0,L]^3\to\R$ as a truncated cosine series over integer wave indices $\vk=(k_x,k_y,k_z)\in\Z^3$:
+\begin{equation}
+\label{eq:phi}
+\phi(\vx)\;=\;\sum_{\vk\in\mathcal{K}} A_{\vk}\,\cos\!\Big( \tfrac{2\pi}{L} \, \vk\cdot\vx + \varphi_{\vk} \Big),
+\end{equation}
+where $A_{\vk}\ge 0$ are amplitudes (we use a flat spectrum, $A_{\vk}\equiv 1$), and $\varphi_{\vk}\sim\mathrm{Unif}[0,2\pi)$ are independent phases. The set $\mathcal{K}$ selects a band of spatial frequencies (Section~\ref{sec:bandpass}). Because the phase argument is $\tfrac{2\pi}{L}\vk\cdot\vx$ with \emph{integer} $\vk$, the field is \emph{periodic} on the domain boundaries:
+\begin{equation*}
+\phi(0,y,z)=\phi(L,y,z),\quad \partial_x\phi(0,y,z)=\partial_x\phi(L,y,z),\quad \text{and cyclic for }y,z.
+\end{equation*}
+Thus, the domain is topologically a 3-torus $\T^3$, and the cell $[0,L]^3$ is an \emph{RVE} (representative volume element) for tiling.
+
+\paragraph{Discrete grid.} In code we sample $N$ points per axis, with voxel spacing $S=L/N$ and sample locations
+\(x_i=i\,S\) for $i=0,\dots,N-1$ (and analogously for $y_j,z_k$). The arrays \texttt{X,Y,Z} in the code hold this grid.
+
+\section{Band-pass Shell and Target Feature Size}
+\label{sec:bandpass}
+Let $\lVert \vk\rVert$ denote the integer-index magnitude. A pure cosine with index magnitude $\lVert\vk\rVert$ has physical wavelength
+\begin{equation}
+\lambda_{\text{phys}}\;=\;\frac{L}{\lVert\vk\rVert}.
+\end{equation}
+The code exposes a user knob \texttt{lambda\_vox}, the desired feature wavelength in \emph{voxels}. Since $S=L/N$, we want $\lambda_{\text{phys}}=\texttt{lambda\_vox}\cdot S=\texttt{lambda\_vox}\cdot\tfrac{L}{N}$. Equating these yields the target index radius
+\begin{equation}
+\label{eq:ktarget}
+\lVert\vk\rVert\approx k_{\text{target}}\;=\;\frac{N}{\texttt{lambda\_vox}}.
+\end{equation}
+We then keep only indices with magnitudes in a thin \emph{spherical shell}
+\begin{equation}
+\label{eq:shell}
+\mathcal{K}_{\text{shell}}\;=\;\Big\{\vk\in\Z^3\setminus\{\bm{0}\}:\; (1-\beta)k_{\text{target}}\le\lVert\vk\rVert\le(1+\beta)k_{\text{target}}\Big\},
+\end{equation}
+where $\beta\in(0,1)$ is the \texttt{bandwidth} knob.
+
+\paragraph{Anisotropy via cones.} To bias the structure along coordinate axes we optionally intersect the shell with one or more \emph{circular cones}. Let $\hat{\vk}=\vk/\lVert\vk\rVert$ and fix half-angles $\theta_x,\theta_y,\theta_z\in(0,\pi/2]$ (\texttt{coneDeg}). We keep $\vk$ if $\hat{\vk}\cdot\hat{\bm{e}}_a\ge\cos\theta_a$ for any selected axis $a\in\{x,y,z\}$, i.e., if $\vk$ lies inside a cone about axis $a$. This is exactly the dot-product test in the helper.
+
+\paragraph{Mode sampling.} From the candidate set we sample \texttt{nModes} indices without replacement and draw i.i.d. phases $\varphi_{\vk}$. The field \eqref{eq:phi} is then assembled. Finally we normalize
+\begin{equation*}
+\phi\leftarrow\frac{\phi-\mu}{\sigma},\qquad \mu=\langle\phi\rangle,\;\sigma=\sqrt{\langle\phi^2\rangle-\mu^2},
+\end{equation*}
+to aid thresholding.
+
+\paragraph{Code mapping.} See \texttt{Matlab/helpers/spinodal\_periodic\_field.m:1} for the exact steps: integer index lattice (\texttt{KX,KY,KZ}), shell mask \eqref{eq:shell}, optional cones, cosine accumulation \eqref{eq:phi}, and normalization.
+
+\section{From Field to Binary Geometry}
+Given $\phi(\vx)$ we create a two-phase structure by thresholding at value $t$ so that a target volume fraction $f$ of the domain is solid. In practice we choose $t$ as an empirical percentile of the samples $\{\phi(x_i,y_j,z_k)\}$:
+\begin{equation}
+\label{eq:percentile}
+ t\;=\;\operatorname{perc}_{p}(\phi),\qquad p\in[0,1],
+\end{equation}
+and then set either $\Omega_{\text{solid}}=\{\phi>t\}$ or $\{\phi<t\}$ depending on which phase we regard as ``solid''. Because $\phi$ is zero-mean and roughly symmetric, $\operatorname{perc}_{p}$ will make $\operatorname{vol}\{\phi>t\}\approx 1-p$. In the code we expose \texttt{solid\_frac} and use MATLAB's \texttt{prctile} to compute $t$, followed by a strict inequality to build \texttt{solidMask}.
+
+\paragraph{Closed skin.} For watertight cells we thicken the six faces by a few voxels to guarantee a closed exterior skin. This avoids open boundaries when extracting a surface and helps volumetric meshing.
+
+\paragraph{Largest component (optional).} If the image toolbox is present we keep only the largest 26-connected solid component to remove small islands; otherwise we proceed as-is.
+
+\section{Surface Extraction and Meshing}
+The triangular surface of the solid phase is extracted by marching cubes (MATLAB's \texttt{isosurface} at level $0.5$ on the binary mask). Vertices are scaled by the voxel size $S=L/N$ to obtain physical units; see \texttt{Matlab/helpers/binary\_to\_watertight\_stl.m:1}. The surface is exported to STL for rapid visualization.
+
+For volumetric analysis we support two mesh paths in \texttt{exp/main\_spinodoid\_mesher.m}:
+\begin{enumerate}[label=\arabic*)]
+  \item \textbf{Tetrahedral meshing (TetGen/GIBBON).} Build a smoothed, optionally decimated PLC (piecewise linear complex) from the isosurface, then tetrahedralize under quality and target-volume constraints. Periodicity is not enforced in the bulk mesh (it is typically applied as PBCs at analysis time), but the boundary geometry inherits the toroidal periodicity, so tiled cells conform.
+  \item \textbf{Voxel-to-brick meshing.} Treat each solid voxel as a hexahedral (C3D8R) element on the regular lattice. This path preserves the binary geometry exactly and is useful when reduced integration bricks are desired. A downsampling factor can be applied to the mask to coarsen the mesh while the \emph{geometry} was still synthesized at high resolution.
+\end{enumerate}
+
+\section{Periodicity, PBCs, and RVEs}
+\paragraph{Why periodic by construction?} Each term in \eqref{eq:phi} is $\cos\big(\tfrac{2\pi}{L}\,\vk\cdot\vx+\varphi_{\vk}\big)$ with integer $\vk$. For any face, say $x=0$ and $x=L$, the phase differs by $2\pi k_x$, so both the value and all tangential derivatives (and $\partial_x$) match. This strong periodicity makes $[0,L]^3$ an \emph{RVE}: tiling the cell creates a seamless infinite medium.
+
+\paragraph{Applying PBCs in FE.} In Abaqus, PBCs are typically enforced by multi-point constraints that tie displacements of opposite faces up to a macroscopic strain. Periodic geometry ensures node pairs exist with consistent topology when the cell is meshed. Because the surface is periodic, any number of copies can be tiled without geometric gaps; see the tiling utilities (e.g., \texttt{Matlab/tile\_spinodoid.m}).
+
+\section{Parameter Knobs and Their Effects}
+\begin{description}[leftmargin=2.3cm,style=nextline]
+  \item[\texttt{N}] Grid resolution per axis. Larger $N$ increases the available Fourier lattice and reduces voxel size $S=L/N$. Geometry richness grows with $N$; for coarse meshes use downstream decimation rather than lowering $N$ during synthesis.
+  \item[\texttt{lambda\_vox}] Target wavelength in \emph{voxels} (Eq.~\eqref{eq:ktarget}). Smaller values push more power to higher frequencies, tightening ligaments.
+  \item[\texttt{bandwidth}] Relative shell thickness $\beta$ (Eq.~\eqref{eq:shell}). Thinner shells yield more monodisperse features; thicker shells produce broader feature spectra.
+  \item[\texttt{nModes}] Number of sampled modes. Larger values improve ergodicity and spatial stationarity.
+  \item[\texttt{coneDeg}] Half-angles for anisotropy about $x,y,z$. Values near $\ang{90}$ recover isotropy; smaller angles admit only $\vk$ near the axis, producing aligned morphologies.
+  \item[\texttt{solid\_frac}] Target volume fraction of the solid phase used to select the threshold $t$ (Eq.~\eqref{eq:percentile}). Because we threshold $\phi$ with a sign choice, ensure the inequality matches the intended phase (solid vs.\ void).
+\end{description}
+
+\section{From the Main Cell to Other Models}
+The same field synthesis feeds other geometries in this repository:
+\begin{itemize}
+  \item \textbf{Sheets and slabs} (e.g., \texttt{Matlab/make\_spinodoid\_sheet.m}): select a subset of slices for a porous layer and stack with a dense base. Tiling in $x$--$y$ reuses the periodic cell.
+  \item \textbf{Stents and tilings} (e.g., \texttt{Matlab/make\_spinodoid\_stent.m}, \texttt{Matlab/tile\_spinodoid.m}): the periodic cell is replicated and mapped onto target domains; because faces match, seams remain watertight.
+\end{itemize}
+
+\section{Practical Guidance}
+\begin{itemize}
+  \item Keep synthesis \emph{high resolution} (large $N$); decimate or coarsen \emph{downstream} (surface reduction for tet meshing, or voxel-mask downsampling for brick meshing) to control mesh size without losing morphology.
+  \item When targeting a specific solid fraction $f$, pick the threshold side (greater-than or less-than) consistent with which phase you want to label as \emph{solid}. For symmetric $\phi$, using the $p$-th percentile yields approximately $f\approx 1-p$ if you take $\{\phi>t\}$.
+  \item Anisotropy is easiest via \texttt{coneDeg}; start with $[\ang{90},\ang{90},\ang{90}]$ (isotropic), then shrink one angle (e.g., $\ang{30}$ about $x$) to bias ligaments.
+  \item For FE with PBCs, mesh a single cell and enforce periodic kinematic constraints on opposite faces; material law and loading define the macroscopic response of the RVE.
+\end{itemize}
+
+\section*{Code Pointers}
+\begin{itemize}
+  \item Field synthesis: \texttt{Matlab/helpers/spinodal\_periodic\_field.m:1}
+  \item Optional rectangular cell: \texttt{Matlab/helpers/spinodal\_periodic\_field\_rect.m:1}
+  \item Periodic Gaussian blur: \texttt{Matlab/helpers/periodic\_gaussian\_blur.m:1}
+  \item Binary to STL: \texttt{Matlab/helpers/binary\_to\_watertight\_stl.m:1}
+  \item Experimental mesher/exports: \texttt{exp/main\_spinodoid\_mesher.m:1}
+\end{itemize}
+
+\end{document}
+

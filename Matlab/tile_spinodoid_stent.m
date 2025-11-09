@@ -1,4 +1,5 @@
 function tile_spinodoid_stent(params)
+tStart = tic;
 %TILE_SPINODOID_STENT Generate multiple spinodoid stents fused along the axis.
 
 if nargin < 1, params = struct(); end
@@ -6,7 +7,7 @@ if nargin < 1, params = struct(); end
 cfg = struct('Ri',5e-3,'Ro',6e-3,'H',20e-3,'Nt',256,'Nz',128,'Nr',48, ...
              'lambda_vox',32,'bandwidth',0.25,'nModes',4000,'solid_frac',0.5, ...
              'coneDeg',[90 90 90],'rngSeed',1,'sigma_vox',0.0,'keepLargest',true, ...
-             'outer_skin_vox',0,'tilesAxial',6);
+             'outer_skin_vox',0,'tilesAxial',3);
 fields = fieldnames(cfg);
 for i = 1:numel(fields)
     fn = fields{i};
@@ -159,6 +160,12 @@ fprintf('Solid fraction (target/actual): %.3f / %.3f\n', cfg.solid_frac, solidFr
 fprintf('Faces: %d, Vertices: %d\n', meshStats.numFaces, meshStats.numVertices);
 fprintf('STL: %s\n', stlPath);
 fprintf('-----------------------------\n\n');
+elapsed = toc(tStart);
+if elapsed < 60
+    fprintf('Run completed in %.2f seconds.\n', elapsed);
+else
+    fprintf('Run completed in %.2f minutes.\n', elapsed/60);
+end
 end
 
 

@@ -1,4 +1,5 @@
 function make_spinodoid_stent(params)
+tStart = tic;
 %MAKE_SPINODOID_STENT Generate a periodic spinodoid stent wrapped on a cylinder.
 %   make_spinodoid_stent() uses defaults; pass a struct to override fields.
 %
@@ -244,6 +245,12 @@ fprintf('Solid fraction (target/actual): %.3f / %.3f\n', cfg.solid_frac, solidFr
 fprintf('Faces: %d, Vertices: %d\n', meshStats.numFaces, meshStats.numVertices);
 fprintf('STL path: %s\n', stlPath);
 fprintf('---------------------------\n\n');
+elapsed = toc(tStart);
+if elapsed < 60
+    fprintf('Run completed in %.2f seconds.\n', elapsed);
+else
+    fprintf('Run completed in %.2f minutes.\n', elapsed/60);
+end
 end
 
 function [maskPad, rPad] = padRadial(mask, rVec)
