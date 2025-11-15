@@ -1,8 +1,8 @@
 function main()
 tStart = tic;
-% ---- Design knobs (safe defaults) ---------------------------------------
+% ------------------------- Design knobs ---------------------------------------
 N            = 128;        % grid size (NxNxN). Use powers of two for speed
-L            = 0.5;        % physical box length (arbitrary units)
+L            = 0.5;        % physical box length (mm)
 lambda_vox   = 32;         % target feature wavelength in voxels (~rib/ligament spacing)
 bandwidth    = 0.50;       % relative shell thickness around target |k| (0.1–0.3)
 nModes       = 4000;       % number of Fourier modes to sample (1k–10k typical)
@@ -74,10 +74,12 @@ end
 
 runTimestamp = datetime('now');
 runLabelBase = sprintf('%s_N%d_sf%02d', lower(spinodalType), N, round(100*solid_frac));
-runDir = fullfile(resultsRoot, runLabelBase);
+typeRoot = fullfile(resultsRoot, lower(spinodalType));
+if ~exist(typeRoot, 'dir'), mkdir(typeRoot); end
+runDir = fullfile(typeRoot, runLabelBase);
 suffix = 2;
 while exist(runDir, 'dir')
-    runDir = fullfile(resultsRoot, sprintf('%s_run%02d', runLabelBase, suffix));
+    runDir = fullfile(typeRoot, sprintf('%s_run%02d', runLabelBase, suffix));
     suffix = suffix + 1;
 end
 if ~exist(runDir, 'dir'), mkdir(runDir); end

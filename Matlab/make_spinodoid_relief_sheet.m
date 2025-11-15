@@ -12,18 +12,18 @@ end
 
 %% -------------------- Design knobs (with defaults) ---------------------
 cfg.N            = 128;        % grid size per base cell
-cfg.L            = 10e-3;      % physical cell size [m]
-cfg.lambda_vox   = 40;
+cfg.L            = 40e-3;      % physical cell size [m]
+cfg.lambda_vox   = 25;
 cfg.bandwidth    = 0.22;
 cfg.nModes       = 4000;
 cfg.solid_frac   = 0.50;
-cfg.coneDeg      = [90 90 90];
+cfg.coneDeg      = [15 15 15];
 cfg.rngSeed      = 1;
 cfg.sigma_vox    = 0.0;        % optional Gaussian blur strength
 
-cfg.t_spin       = 2.0e-3;     % spinodoid relief thickness [m]
+cfg.t_spin       = 2e-3;     % spinodoid relief thickness [m]
 cfg.t_base       = 1.5e-3;     % dense base thickness [m]
-cfg.tilesXY      = [1 1];      % tiling in X/Y
+cfg.tilesXY      = [3 3];      % tiling in X/Y
 cfg.add_outer_skin_vox = 0;    % perimeter sealing on the whole sheet
 cfg.slice_count  = 10;          % number of top slices to average for 2D driver
 
@@ -100,12 +100,18 @@ Lz = cfg.t_base + cfg.t_spin;
 spinodalType = 'anisotropic';
 if all(cfg.coneDeg >= 89)
     spinodalType = 'isotropic';
+elseif cfg.coneDeg(1) == 30 && all(cfg.coneDeg([2 3]) == 0)
+    spinodalType = 'columnar';
+elseif cfg.coneDeg(2) == 30 && all(cfg.coneDeg([1 3]) == 0)
+    spinodalType = 'lamellar';
 end
 
 runTimestamp = datetime('now');
 runLabelBase = sprintf('sheetRelief_%s_N%d_%dx%d_t%dum_%dum', ...
     lower(spinodalType), cfg.N, tx, ty, round(1e6*cfg.t_spin), round(1e6*cfg.t_base));
-runDir = unique_run_dir(resultsRoot, runLabelBase);
+typeRoot = fullfile(resultsRoot, lower(spinodalType));
+if ~exist(typeRoot,'dir'), mkdir(typeRoot); end
+runDir = unique_run_dir(typeRoot, runLabelBase);
 [~, runFolderName] = fileparts(runDir);
 
 stlFileName = sprintf('sheet_relief_spinodoid_N%d_%dx%d_L%.1fmm_t%.2f_%.2fmm.stl', ...

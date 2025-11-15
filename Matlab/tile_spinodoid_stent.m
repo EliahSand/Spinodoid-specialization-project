@@ -62,12 +62,20 @@ solidMask(:,end,:) = solidMask(:,1,:);
 
 solidFractionActual = mean(solidMask(:));
 spinodalType = 'anisotropic';
-if all(cfg.coneDeg >= 89), spinodalType = 'isotropic'; end
+if all(cfg.coneDeg >= 89)
+    spinodalType = 'isotropic';
+elseif cfg.coneDeg(1) == 30 && all(cfg.coneDeg([2 3]) == 0)
+    spinodalType = 'lamellar';
+elseif cfg.coneDeg(2) == 30 && all(cfg.coneDeg([1 3]) == 0)
+    spinodalType = 'columnar';
+end
 
 runTimestamp = datetime('now');
 runLabelBase = sprintf('stentTiled_%s_Ri%03dum_Ro%03dum_H%03dum_tiles%d', ...
     lower(spinodalType), round(1e6*cfg.Ri), round(1e6*cfg.Ro), round(1e6*cfg.H), cfg.tilesAxial);
-runDir = unique_run_dir(resultsRoot, runLabelBase);
+typeRoot = fullfile(resultsRoot, lower(spinodalType));
+if ~exist(typeRoot,'dir'), mkdir(typeRoot); end
+runDir = unique_run_dir(typeRoot, runLabelBase);
 [~, runFolderName] = fileparts(runDir);
 
 stlFileName = sprintf('spinodoid_STENT_TILED_Ri%03dum_Ro%03dum_H%03dum_tiles%d.stl', ...

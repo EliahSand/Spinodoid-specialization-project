@@ -87,12 +87,18 @@ Lz = Nz * Svox;
 spinodalType = 'anisotropic';
 if all(coneDeg >= 89)
     spinodalType = 'isotropic';
+elseif coneDeg(1) == 30 && all(coneDeg([2 3]) == 0)
+    spinodalType = 'lamellar';
+elseif coneDeg(2) == 30 && all(coneDeg([1 3]) == 0)
+    spinodalType = 'columnar';
 end
 
 runTimestamp = datetime('now');
 runLabelBase = sprintf('sheet_%s_N%d_%dx%d_t%dum_%dum', ...
     lower(spinodalType), N, tx, ty, round(1e6 * t_spin), round(1e6 * t_base));
-runDir = unique_run_dir(resultsRoot, runLabelBase);
+typeRoot = fullfile(resultsRoot, lower(spinodalType));
+if ~exist(typeRoot, 'dir'), mkdir(typeRoot); end
+runDir = unique_run_dir(typeRoot, runLabelBase);
 [~, runFolderName] = fileparts(runDir);
 
 stlFileName = sprintf('sheet_spinodoid_base_N%d_%dx%d_L%.1fmm_t%.2f_%.2fmm.stl', ...

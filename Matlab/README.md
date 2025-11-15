@@ -57,9 +57,6 @@ $$
 and the same holds for $ y $ and $ z $.  
 Thus, opposite faces of the cube wrap seamlessly — both in value and in slope.
 
-When you threshold $ \phi(\mathbf{x}) $ into a binary mask (solid vs. void), the interface defined by $ \phi = \text{const} $
-also wraps continuously across boundaries, forming a **toroidal (periodic)** field.
-
 ---
 
 ## 3. Why this matters

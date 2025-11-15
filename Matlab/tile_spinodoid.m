@@ -102,12 +102,20 @@ solidFractionCell  = mean(phi(:) > t); % report vs same threshold for reference
 
 %% -------------------- Export & log -------------------------------------
 spinodalType = 'anisotropic';
-if all(coneDeg >= 89), spinodalType = 'isotropic'; end
+if all(coneDeg >= 89)
+    spinodalType = 'isotropic';
+elseif coneDeg(1) == 30 && all(coneDeg([2 3]) == 0)
+    spinodalType = 'lamellar';
+elseif coneDeg(2) == 30 && all(coneDeg([1 3]) == 0)
+    spinodalType = 'columnar';
+end
 
 runTimestamp = datetime('now');
 runLabelBase = sprintf('tiled_%s_N%d_sf%02d_%dx%dx%d', ...
     lower(spinodalType), N, round(100*solid_frac), tx, ty, tz);
-runDir = unique_run_dir(resultsRoot, runLabelBase);
+typeRoot = fullfile(resultsRoot, lower(spinodalType));
+if ~exist(typeRoot,'dir'), mkdir(typeRoot); end
+runDir = unique_run_dir(typeRoot, runLabelBase);
 [~, runFolderName] = fileparts(runDir);
 
 stlFileName = sprintf('spinodoid_TILED_N%d_sf%02d_%dx%dx%d.stl', ...
