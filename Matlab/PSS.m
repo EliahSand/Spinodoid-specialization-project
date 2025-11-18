@@ -1,14 +1,27 @@
-function tile_spinodoid_stent_periodized(params)
+function PSS(params)
 tStart = tic;
-%TILE_SPINODOID_STENT_PERIODIZED Axially tile a spinodoid stent whose spinodal
-%pattern repeats every theta partition (e.g., 4 -> four identical 90° wedges).
+%---PSS - Periodic Spinodal Stent----
+%Axially tiles a spinodal stent with angular periodization across theta partitions.
 
 if nargin < 1, params = struct(); end
 
-cfg = struct('Ri',5e-3,'Ro',6e-3,'H',20e-3,'Nt',256,'Nz',128,'Nr',48, ...
-             'lambda_vox',32,'bandwidth',0.25,'nModes',4000,'solid_frac',0.5, ...
-             'coneDeg',[90 90 90],'rngSeed',1,'sigma_vox',0.0,'keepLargest',true, ...
-             'outer_skin_vox',0,'tilesAxial',3,'theta_partitions',4);
+cfg = struct('Ri',5e-3, ...
+    'Ro',6e-3, ...
+    'H',20e-3, ...
+    'Nt',256, ...
+    'Nz',128, ...
+    'Nr',48, ...
+    'lambda_vox',32, ...
+    'bandwidth',0.25, ...
+    'nModes',4000, ...
+    'solid_frac',0.5, ...
+    'coneDeg',[90 90 90], ...
+    'rngSeed',1, ...
+    'sigma_vox',0.0, ...
+    'keepLargest',true, ...
+    'outer_skin_vox',0, ...
+    'tilesAxial',2, ...
+    'theta_partitions',2);
 fields = fieldnames(cfg);
 for i = 1:numel(fields)
     fn = fields{i};
@@ -20,14 +33,12 @@ cfg.Nt = max(8, round(cfg.Nt));
 cfg.Nz = max(4, round(cfg.Nz));
 cfg.Nr = max(3, round(cfg.Nr));
 cfg.theta_partitions = max(1, round(cfg.theta_partitions));
-if cfg.Ro <= cfg.Ri, error('tile_spinodoid_stent_periodized:invalidRadius', 'Ro must exceed Ri'); end
+if cfg.Ro <= cfg.Ri, error('PSS:invalidRadius', 'Ro must exceed Ri'); end
 
 scriptDir = fileparts(mfilename('fullpath'));
 helpersDir = fullfile(scriptDir,'helpers');
 if ~isfolder(helpersDir), error('Helpers directory missing: %s', helpersDir); end
 addpath(helpersDir);
-resultsRoot = fullfile(scriptDir,'results','stents_periodized_tiled');
-if ~exist(resultsRoot,'dir'), mkdir(resultsRoot); end
 
 %% Generate base stent mask with angular periodization
 rng(cfg.rngSeed);
@@ -135,19 +146,41 @@ elseif cfg.coneDeg(1) == 30 && all(cfg.coneDeg([2 3]) == 0)
     spinodalType = 'lamellar';
 elseif cfg.coneDeg(2) == 30 && all(cfg.coneDeg([1 3]) == 0)
     spinodalType = 'columnar';
+elseif all(cfg.coneDeg == 15)
+    spinodalType = 'cubic';
 end
 
+isPeriodic = (cfg.theta_partitions > 1) || (cfg.tilesAxial > 1);
+if isPeriodic
+    modeLabel = 'periodic';
+else
+    modeLabel = 'single';
+end
+resultsRoot = fullfile(scriptDir,'results','stents',modeLabel);
+if ~exist(resultsRoot,'dir'), mkdir(resultsRoot); end
+
 runTimestamp = datetime('now');
-runLabelBase = sprintf('stentPeriodizedTiled_%s_Ri%03dum_Ro%03dum_H%03dum_tp%d_tiles%d', ...
-    lower(spinodalType), round(1e6*cfg.Ri), round(1e6*cfg.Ro), round(1e6*cfg.H), ...
-    cfg.theta_partitions, cfg.tilesAxial);
+if isPeriodic
+    runLabelBase = sprintf('stent_%s_%s_Ri%03dum_Ro%03dum_H%03dum_tp%d_tiles%d', ...
+        modeLabel, lower(spinodalType), round(1e6*cfg.Ri), round(1e6*cfg.Ro), ...
+        round(1e6*cfg.H), cfg.theta_partitions, cfg.tilesAxial);
+else
+    runLabelBase = sprintf('stent_%s_%s_Ri%03dum_Ro%03dum_H%03dum', ...
+        modeLabel, lower(spinodalType), round(1e6*cfg.Ri), round(1e6*cfg.Ro), ...
+        round(1e6*cfg.H));
+end
 typeRoot = fullfile(resultsRoot, lower(spinodalType));
 if ~exist(typeRoot,'dir'), mkdir(typeRoot); end
 runDir = unique_run_dir(typeRoot, runLabelBase);
 [~, runFolderName] = fileparts(runDir);
 
-stlFileName = sprintf('spinodoid_STENT_PERIODIZED_TILED_Ri%03dum_Ro%03dum_H%03dum_tp%d_tiles%d.stl', ...
-    round(1e6*cfg.Ri), round(1e6*cfg.Ro), round(1e6*cfg.H), cfg.theta_partitions, cfg.tilesAxial);
+if isPeriodic
+    stlFileName = sprintf('spinodoid_STENT_PERIODIC_Ri%03dum_Ro%03dum_H%03dum_tp%d_tiles%d.stl', ...
+        round(1e6*cfg.Ri), round(1e6*cfg.Ro), round(1e6*cfg.H), cfg.theta_partitions, cfg.tilesAxial);
+else
+    stlFileName = sprintf('spinodoid_STENT_Ri%03dum_Ro%03dum_H%03dum.stl', ...
+        round(1e6*cfg.Ri), round(1e6*cfg.Ro), round(1e6*cfg.H));
+end
 stlPath = unique_path(fullfile(runDir, stlFileName));
 
 thetaVec = linspace(0, 2*pi, Nt+1); thetaVec(end) = [];
@@ -162,7 +195,7 @@ maskRTZ = permute(solidMaskTiled, [3 1 2]); % [Nr Nt Nz] -> [r t z]
 
 fv = isosurface(XGrid, YGrid, ZGrid, double(maskWrapped), 0.5);
 if isempty(fv.vertices)
-    error('tile_spinodoid_stent_periodized:emptySurface', 'Stent surface is empty. Check parameters.');
+    error('PSS:emptySurface', 'Stent surface is empty. Check parameters.');
 end
 
 fv.faces = double(fv.faces);
@@ -191,6 +224,7 @@ paramLines = {
     sprintf('  coneDeg: [%s]', num2str(cfg.coneDeg))
     sprintf('  sigma_vox: %.3f', cfg.sigma_vox)
     sprintf('  theta_partitions: %d', cfg.theta_partitions)
+    sprintf('  mode: %s', modeLabel)
     sprintf('  keep_largest: %d', cfg.keepLargest)
     sprintf('  outer_skin_vox: %d', cfg.outer_skin_vox)
     sprintf('  rng_seed: %d', cfg.rngSeed)
@@ -261,7 +295,7 @@ phiRep = phi;
 Nt = size(phi,1);
 if thetaPartitions <= 1, return; end
 if mod(Nt, thetaPartitions) ~= 0
-    error('tile_spinodoid_stent_periodized:thetaDiv', ...
+    error('PSS:thetaDiv', ...
         'Nt (%d) must be divisible by theta_partitions (%d).', Nt, thetaPartitions);
 end
 NtSector = Nt / thetaPartitions;

@@ -57,6 +57,22 @@ $$
 and the same holds for $ y $ and $ z $.  
 Thus, opposite faces of the cube wrap seamlessly — both in value and in slope.
 
+### Radial/axial periodicity for stents
+
+The cylindrical generators (`make_spinodoid_stent.m`, `tile_spinodoid_stent.m`, `PSS`, `PSSL`) synthesize the scalar field directly in $(\theta,z,r)$ coordinates:
+
+$$
+\phi(\theta,z,r) = \sum_{m=1}^{M} a_m \cos\!\left( k_\theta^{(m)} \theta + k_z^{(m)} z + k_r^{(m)} (r-R_i) + \gamma_m \right),
+$$
+
+with $k_\theta^{(m)} = n_m$ (integers) enforcing $\phi(\theta+2\pi,z,r)=\phi(\theta,z,r)$, while $k_z^{(m)}$ and $k_r^{(m)}$ are chosen so that $\phi(z+H)=\phi(z)$ and the radial band spans $R_i \le r \le R_o$. During discretization the array is explicitly wrapped: the first and last azimuthal slices are identical, and thin padding layers are added in $\theta$, $z$, and $r$ before extracting the isosurface. When `theta_partitions = N_p > 1`, the raw field $\phi_0(\theta,z,r)$ is projected onto wedge-symmetric modes by averaging over the $N_p$ sectors,
+
+$$
+\tilde{\phi}(\theta,z,r) = \frac{1}{N_p} \sum_{p=0}^{N_p-1} \phi_0\!\left(\theta + \frac{2\pi p}{N_p}, z, r\right),
+$$
+
+which guarantees $\tilde{\phi}(\theta + 2\pi/N_p,z,r)=\tilde{\phi}(\theta,z,r)$ and thus $\tilde{\phi}(\theta + 2\pi,z,r)=\tilde{\phi}(\theta,z,r)$, yielding $N_p$ identical angular partitions without seams.
+
 ---
 
 ## 3. Why this matters

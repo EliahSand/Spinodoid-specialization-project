@@ -1,6 +1,6 @@
-function tile_spinodoid()
+function main_cubed()
 tStart = tic;
-% Multi-cell spinodoid generator (periodic & seam-free)
+%main_cubed - Multi-cell spinodoid generator (periodic & seam-free)
 % Pipeline:
 % 1) Generate one periodic scalar field phi via cosine-mode synthesis
 % 2) Tile phi periodically
@@ -8,10 +8,10 @@ tStart = tic;
 % 4) Export watertight STL + run log
 
 %% -------------------- Design knobs -------------------------------------
-N            = 128;        % grid size of the base cell (NxNxN)
+N            = 64;        % grid size of the base cell (NxNxN)
 L            = 0.30;       % physical box length of one cell (arbitrary units)
 lambda_vox   = 32;         % target feature wavelength (in voxels)
-bandwidth    = 0.30;       % spectral shell thickness (0.1–0.3)
+bandwidth    = 0.70;       % spectral shell thickness (0.1–0.3)
 nModes       = 4000;       % number of Fourier modes
 solid_frac   = 0.50;       % SOLID volume fraction after threshold (0..1)
 coneDeg      = [90 90 90]; % cone half-angles; [90 90 90] = isotropic

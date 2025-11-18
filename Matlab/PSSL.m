@@ -1,7 +1,7 @@
-function tile_spinodoid_relief_stent_periodized(params)
+function PSSL(params)
 tStart = tic;
-%TILE_SPINODOID_RELIEF_STENT_PERIODIZED Axially tile the angularly
-%periodized relief stent (dense inner wall + spinodal relief shell).
+%----PSSL - Periodic Spinodal Stent Layered----
+%Axially tiled relief stent with angularly periodized spinodal layers.
 
 if nargin < 1
     params = struct();
@@ -25,8 +25,8 @@ cfg = struct( ...
     'slice_count', 10, ...
     't_spin', 0.5e-3, ...
     't_base', 0.5e-3, ...
-    'theta_partitions', 1, ...
-    'tilesAxial', 1);
+    'theta_partitions', 2, ...
+    'tilesAxial', 2);
 
 fields = fieldnames(cfg);
 for i = 1:numel(fields)
@@ -44,109 +44,29 @@ cfg.slice_count = max(1, round(cfg.slice_count));
 cfg.outer_skin_vox = max(0, round(cfg.outer_skin_vox));
 cfg.theta_partitions = max(1, round(cfg.theta_partitions));
 
-shellThickness = cfg.Ro - cfg.Ri;
-if shellThickness <= 0
-    error('tile_spinodoid_relief_stent_periodized:invalidRadius', ...
-        'Outer radius must exceed inner radius.');
-end
-if cfg.t_base <= 0 || cfg.t_spin <= 0
-    error('tile_spinodoid_relief_stent_periodized:invalidThickness', ...
-        'Both t_base and t_spin must be positive.');
-end
-layerSum = cfg.t_base + cfg.t_spin;
-tolThickness = max(1e-9, 1e-3 * shellThickness);
-if abs(layerSum - shellThickness) > tolThickness
-    error('tile_spinodoid_relief_stent_periodized:thicknessMismatch', ...
-        't_base + t_spin (%.6f) must equal shell thickness Ro-Ri (%.6f).', ...
-        layerSum, shellThickness);
-end
-
-targetBaseVox = cfg.Nr * (cfg.t_base / shellThickness);
-nrBase = max(1, min(cfg.Nr-1, round(targetBaseVox)));
-nrSpin = cfg.Nr - nrBase;
-if nrSpin < 1
-    error('tile_spinodoid_relief_stent_periodized:spinVoxels', ...
-        'Spin layer collapsed to zero voxels; increase Nr or reduce t_base.');
-end
-
-actualBaseThickness = shellThickness * (nrBase / cfg.Nr);
-actualSpinThickness = shellThickness - actualBaseThickness;
-
 scriptDir  = fileparts(mfilename('fullpath'));
 helpersDir = fullfile(scriptDir, 'helpers');
 if ~isfolder(helpersDir)
     error('Helpers directory missing: %s', helpersDir);
 end
 addpath(helpersDir);
-resultsRoot = fullfile(scriptDir, 'results', 'stent_relief_periodized_tiled');
-if ~exist(resultsRoot,'dir'), mkdir(resultsRoot); end
 
-%% Generate spinodal driver for a single segment
-rng(cfg.rngSeed);
-Ltheta = 2*pi * ((cfg.Ri + cfg.Ro)/2);
-Lz = cfg.H;
-Lr = shellThickness;
-[phi, meta] = spinodal_periodic_field_rect([cfg.Nt cfg.Nz cfg.Nr], ...
-    [Ltheta Lz Lr], cfg.lambda_vox, cfg.bandwidth, cfg.nModes, cfg.coneDeg);
-
-if cfg.sigma_vox > 0
-    phi = periodic_gaussian_blur(phi, cfg.sigma_vox);
-    phi = phi - mean(phi(:));
-    phi = phi ./ (std(phi(:)) + eps);
-end
-
-phi = enforce_theta_partitions(phi, cfg.theta_partitions);
-Nt = size(phi,1);
-
-slab = min(max(1, cfg.slice_count), nrSpin);
-phiOuter = phi(:,:,end-slab+1:end);
-phi2 = mean(phiOuter, 3);
-phi2 = phi2 - mean(phi2(:));
-phi2 = phi2 ./ (std(phi2(:)) + eps);
-
-threshold2 = prctile(phi2(:), 100 * cfg.solid_frac);
-mask2 = phi2 > threshold2;
-solidFractionPattern = mean(mask2(:));
-
-baseLayer = true(Nt, cfg.Nz, nrBase);
-spinLayer = repmat(mask2, 1, 1, nrSpin);
-segmentMask = cat(3, baseLayer, spinLayer);
-
-solidFractionBase = mean(baseLayer(:));
-solidFractionSpinLayer = mean(spinLayer(:));
-solidFractionSegment = mean(segmentMask(:));
-
-%% Tile along axial direction
-stentMask = repmat(segmentMask, [1 cfg.tilesAxial 1]);
-NzTotal = size(stentMask, 2);
-HTotal = cfg.H * cfg.tilesAxial;
-
-if cfg.outer_skin_vox > 0
-    s = min(cfg.outer_skin_vox, floor(NzTotal/8));
-    stentMask(:,1:s,:) = true;
-    stentMask(:,end-s+1:end,:) = true;
-end
-
-axial_skin_vox = max(1, round(0.02 * NzTotal));
-axial_skin_vox = min(axial_skin_vox, max(1, floor(NzTotal/2)));
-Nr = size(stentMask,3);
-for i = 1:Nt
-    for r = 1:Nr
-        column = squeeze(stentMask(i,:,r));
-        firstSolid = find(column, 1, 'first');
-        if ~isempty(firstSolid) && firstSolid <= axial_skin_vox + 1
-            column(1:firstSolid) = true;
-        end
-        lastSolid = find(column, 1, 'last');
-        if ~isempty(lastSolid) && lastSolid >= (NzTotal - axial_skin_vox)
-            column(lastSolid:end) = true;
-        end
-        stentMask(i,:,r) = column;
-    end
-end
-
-stentMask(:,end,:) = stentMask(:,1,:);
-solidFractionTotal = mean(stentMask(:));
+%% Geometry generation (mirrors tile_spinodoid_relief_stent_periodized)
+[geomState, meta] = generate_relief_stent_geometry(cfg);
+stentMask                 = geomState.stentMask;
+Nt                        = geomState.Nt;
+NzTotal                   = geomState.NzTotal;
+HTotal                    = geomState.HTotal;
+shellThickness            = geomState.shellThickness;
+nrBase                    = geomState.nrBase;
+nrSpin                    = geomState.nrSpin;
+actualBaseThickness       = geomState.actualBaseThickness;
+actualSpinThickness       = geomState.actualSpinThickness;
+solidFractionBase         = geomState.solidFractionBase;
+solidFractionSpinLayer    = geomState.solidFractionSpinLayer;
+solidFractionSegment      = geomState.solidFractionSegment;
+solidFractionTotal        = geomState.solidFractionTotal;
+solidFractionPattern      = geomState.solidFractionPattern;
 
 %% Export tiled geometry
 spinodalType = 'anisotropic';
@@ -156,19 +76,41 @@ elseif cfg.coneDeg(1) == 30 && all(cfg.coneDeg([2 3]) == 0)
     spinodalType = 'lamellar';
 elseif cfg.coneDeg(2) == 30 && all(cfg.coneDeg([1 3]) == 0)
     spinodalType = 'columnar';
+elseif all(cfg.coneDeg == 15)
+    spinodalType = 'cubic';
 end
 
+isPeriodic = (cfg.theta_partitions > 1) || (cfg.tilesAxial > 1);
+if isPeriodic
+    modeLabel = 'periodic';
+else
+    modeLabel = 'single';
+end
+resultsRoot = fullfile(scriptDir, 'results', 'stent_relief', modeLabel);
+if ~exist(resultsRoot,'dir'), mkdir(resultsRoot); end
+
 runTimestamp = datetime('now');
-runLabelBase = sprintf('stentReliefPeriodizedTiled_%s_Ri%03dum_Ro%03dum_H%03dum_tp%d_tiles%d', ...
-    lower(spinodalType), round(1e6*cfg.Ri), round(1e6*cfg.Ro), round(1e6*cfg.H), ...
-    cfg.theta_partitions, cfg.tilesAxial);
+if isPeriodic
+    runLabelBase = sprintf('stentRelief_%s_%s_Ri%03dum_Ro%03dum_H%03dum_tp%d_tiles%d', ...
+        modeLabel, lower(spinodalType), round(1e6*cfg.Ri), round(1e6*cfg.Ro), ...
+        round(1e6*cfg.H), cfg.theta_partitions, cfg.tilesAxial);
+else
+    runLabelBase = sprintf('stentRelief_%s_%s_Ri%03dum_Ro%03dum_H%03dum', ...
+        modeLabel, lower(spinodalType), round(1e6*cfg.Ri), round(1e6*cfg.Ro), ...
+        round(1e6*cfg.H));
+end
 typeRoot = fullfile(resultsRoot, lower(spinodalType));
 if ~exist(typeRoot,'dir'), mkdir(typeRoot); end
 runDir = unique_run_dir(typeRoot, runLabelBase);
 [~, runFolderName] = fileparts(runDir);
 
-stlFileName = sprintf('spinodoid_STENT_RELIEF_PERIODIZED_TILED_Ri%03dum_Ro%03dum_H%03dum_tp%d_tiles%d.stl', ...
-    round(1e6*cfg.Ri), round(1e6*cfg.Ro), round(1e6*cfg.H), cfg.theta_partitions, cfg.tilesAxial);
+if isPeriodic
+    stlFileName = sprintf('spinodoid_STENT_RELIEF_PERIODIC_Ri%03dum_Ro%03dum_H%03dum_tp%d_tiles%d.stl', ...
+        round(1e6*cfg.Ri), round(1e6*cfg.Ro), round(1e6*cfg.H), cfg.theta_partitions, cfg.tilesAxial);
+else
+    stlFileName = sprintf('spinodoid_STENT_RELIEF_Ri%03dum_Ro%03dum_H%03dum.stl', ...
+        round(1e6*cfg.Ri), round(1e6*cfg.Ro), round(1e6*cfg.H));
+end
 stlPath = unique_path(fullfile(runDir, stlFileName));
 
 thetaVec = linspace(0, 2*pi, Nt+1); thetaVec(end) = [];
@@ -191,7 +133,7 @@ maskRTZ = permute(stentMask, [3 1 2]);
 
 fv = isosurface(XGrid, YGrid, ZGrid, double(maskWrapped), 0.5);
 if isempty(fv.vertices)
-    error('tile_spinodoid_relief_stent_periodized:emptySurface', ...
+    error('PSSL:emptySurface', ...
         'Relief stent surface is empty. Adjust parameters.');
 end
 
@@ -221,6 +163,7 @@ paramLines = {
     sprintf('  coneDeg: [%s]', num2str(cfg.coneDeg))
     sprintf('  sigma_vox: %.3f', cfg.sigma_vox)
     sprintf('  slice_count: %d', cfg.slice_count)
+    sprintf('  mode: %s', modeLabel)
     sprintf('  theta_partitions: %d', cfg.theta_partitions)
     sprintf('  rng_seed: %d', cfg.rngSeed)
     sprintf('  modes_used: %d', meta.nModes)
@@ -304,8 +247,119 @@ fprintf('--------------------------------------------\n\n');
 if elapsedSeconds < 60
     fprintf('Run completed in %.2f seconds.\n', elapsedSeconds);
 else
-    fprintf('Run completed in %.2f minutes.\n', elapsedSeconds/60);
+fprintf('Run completed in %.2f minutes.\n', elapsedSeconds/60);
 end
+end
+
+function [state, meta] = generate_relief_stent_geometry(cfg)
+shellThickness = cfg.Ro - cfg.Ri;
+if shellThickness <= 0
+    error('PSSL:invalidRadius', ...
+        'Outer radius must exceed inner radius.');
+end
+if cfg.t_base <= 0 || cfg.t_spin <= 0
+    error('PSSL:invalidThickness', ...
+        'Both t_base and t_spin must be positive.');
+end
+layerSum = cfg.t_base + cfg.t_spin;
+tolThickness = max(1e-9, 1e-3 * shellThickness);
+if abs(layerSum - shellThickness) > tolThickness
+    error('PSSL:thicknessMismatch', ...
+        't_base + t_spin (%.6f) must equal shell thickness Ro-Ri (%.6f).', ...
+        layerSum, shellThickness);
+end
+
+targetBaseVox = cfg.Nr * (cfg.t_base / shellThickness);
+nrBase = max(1, min(cfg.Nr-1, round(targetBaseVox)));
+nrSpin = cfg.Nr - nrBase;
+if nrSpin < 1
+    error('PSSL:spinVoxels', ...
+        'Spin layer collapsed to zero voxels; increase Nr or reduce t_base.');
+end
+
+actualBaseThickness = shellThickness * (nrBase / cfg.Nr);
+actualSpinThickness = shellThickness - actualBaseThickness;
+
+rng(cfg.rngSeed);
+Ltheta = 2*pi * ((cfg.Ri + cfg.Ro)/2);
+Lz = cfg.H;
+Lr = shellThickness;
+[phi, meta] = spinodal_periodic_field_rect([cfg.Nt cfg.Nz cfg.Nr], ...
+    [Ltheta Lz Lr], cfg.lambda_vox, cfg.bandwidth, cfg.nModes, cfg.coneDeg);
+
+if cfg.sigma_vox > 0
+    phi = periodic_gaussian_blur(phi, cfg.sigma_vox);
+    phi = phi - mean(phi(:));
+    phi = phi ./ (std(phi(:)) + eps);
+end
+
+phi = enforce_theta_partitions(phi, cfg.theta_partitions);
+Nt = size(phi,1);
+
+slab = min(max(1, cfg.slice_count), nrSpin);
+phiOuter = phi(:,:,end-slab+1:end);
+phi2 = mean(phiOuter, 3);
+phi2 = phi2 - mean(phi2(:));
+phi2 = phi2 ./ (std(phi2(:)) + eps);
+
+threshold2 = prctile(phi2(:), 100 * cfg.solid_frac);
+mask2 = phi2 > threshold2;
+solidFractionPattern = mean(mask2(:));
+
+baseLayer = true(Nt, cfg.Nz, nrBase);
+spinLayer = repmat(mask2, 1, 1, nrSpin);
+segmentMask = cat(3, baseLayer, spinLayer);
+
+solidFractionBase = mean(baseLayer(:));
+solidFractionSpinLayer = mean(spinLayer(:));
+solidFractionSegment = mean(segmentMask(:));
+
+stentMask = repmat(segmentMask, [1 cfg.tilesAxial 1]);
+NzTotal = size(stentMask, 2);
+HTotal = cfg.H * cfg.tilesAxial;
+
+if cfg.outer_skin_vox > 0
+    s = min(cfg.outer_skin_vox, floor(NzTotal/8));
+    stentMask(:,1:s,:) = true;
+    stentMask(:,end-s+1:end,:) = true;
+end
+
+axial_skin_vox = max(1, round(0.02 * NzTotal));
+axial_skin_vox = min(axial_skin_vox, max(1, floor(NzTotal/2)));
+Nr = size(stentMask,3);
+for i = 1:Nt
+    for r = 1:Nr
+        column = squeeze(stentMask(i,:,r));
+        firstSolid = find(column, 1, 'first');
+        if ~isempty(firstSolid) && firstSolid <= axial_skin_vox + 1
+            column(1:firstSolid) = true;
+        end
+        lastSolid = find(column, 1, 'last');
+        if ~isempty(lastSolid) && lastSolid >= (NzTotal - axial_skin_vox)
+            column(lastSolid:end) = true;
+        end
+        stentMask(i,:,r) = column;
+    end
+end
+
+stentMask(:,end,:) = stentMask(:,1,:);
+solidFractionTotal = mean(stentMask(:));
+
+state = struct( ...
+    'stentMask', stentMask, ...
+    'Nt', Nt, ...
+    'NzTotal', NzTotal, ...
+    'HTotal', HTotal, ...
+    'shellThickness', shellThickness, ...
+    'nrBase', nrBase, ...
+    'nrSpin', nrSpin, ...
+    'actualBaseThickness', actualBaseThickness, ...
+    'actualSpinThickness', actualSpinThickness, ...
+    'solidFractionBase', solidFractionBase, ...
+    'solidFractionSpinLayer', solidFractionSpinLayer, ...
+    'solidFractionSegment', solidFractionSegment, ...
+    'solidFractionTotal', solidFractionTotal, ...
+    'solidFractionPattern', solidFractionPattern);
 end
 
 function phiRep = enforce_theta_partitions(phi, thetaPartitions)
@@ -315,7 +369,7 @@ if thetaPartitions <= 1
     return;
 end
 if mod(Nt, thetaPartitions) ~= 0
-    error('tile_spinodoid_relief_stent_periodized:thetaDiv', ...
+    error('PSSL:thetaDiv', ...
         'Nt (%d) must be divisible by theta_partitions (%d).', Nt, thetaPartitions);
 end
 NtSector = Nt / thetaPartitions;

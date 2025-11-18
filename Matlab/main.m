@@ -1,10 +1,10 @@
 function main()
 tStart = tic;
 % ------------------------- Design knobs ---------------------------------------
-N            = 128;        % grid size (NxNxN). Use powers of two for speed
-L            = 0.5;        % physical box length (mm)
+N            = 64;        % grid size (NxNxN). Use powers of two for speed
+L            = 0.2;        % physical box length (mm)
 lambda_vox   = 32;         % target feature wavelength in voxels (~rib/ligament spacing)
-bandwidth    = 0.50;       % relative shell thickness around target |k| (0.1–0.3)
+bandwidth    = 0.7;       % relative shell thickness around target |k| (0.1–0.3)
 nModes       = 4000;       % number of Fourier modes to sample (1k–10k typical)
 solid_frac   = 0.5;        % volume fraction of SOLID after threshold (0..1)
 coneDeg      = [90 90 90]; % cone half-angles about x,y,z (90= isotropic). e.g. [90 90 90]
@@ -69,7 +69,8 @@ elseif coneDeg(1) == 30 && all(coneDeg([2 3]) == 0)
     spinodalType = 'lamellar';
 elseif coneDeg(2) == 30 && all(coneDeg([1 3]) == 0)
     spinodalType = 'columnar';
-
+elseif all(cfg.coneDeg == 15)
+    spinodalType = 'cubic';
 end
 
 runTimestamp = datetime('now');
@@ -164,6 +165,8 @@ else
     fclose(fid);
     fprintf('Logged run parameters to: %s\n', logPath);
 end
+
+%save(fullfile(resultsRoot,'isotropic','spinov2','solidMask.mat'),'solidMask','-v7.3');
 
 fprintf('\n---- RUN SUMMARY ----\n');
 fprintf('Folder: %s\n', runFolderName);

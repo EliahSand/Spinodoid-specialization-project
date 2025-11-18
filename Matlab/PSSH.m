@@ -1,36 +1,35 @@
-function make_spinodoid_relief_sheet(params)
+function PSSH(params)
 tStart = tic;
-%MAKE_SPINODOID_RELIEF_SHEET Solid slab + extruded spinodoid relief.
-%   Bottom: dense homogeneous slab (thickness t_base)
-%   Top   : constant-thickness spinodoid "carpet" extruded from a 2D slice
-%           of the same periodic field used in main.m (no taper/slope).
-%   The two layers are fused into a single watertight solid block.
+%---PSSH - Periodic Spinodal Sheet Layered (relief version)----
+% Dense base slab + constant-thickness spinodoid carpet extruded from an
+% averaged 2D slice of the periodic field (identical logic to the legacy
+% make_spinodoid_relief_sheet.m script).
 
 if nargin < 1
     params = struct();
 end
 
-%% -------------------- Design knobs (with defaults) ---------------------
-cfg.N            = 128;        % grid size per base cell
-cfg.L            = 40e-3;      % physical cell size [m]
+cfg = struct();
+cfg.N            = 128;
+cfg.L            = 40e-3;
 cfg.lambda_vox   = 25;
 cfg.bandwidth    = 0.22;
 cfg.nModes       = 4000;
 cfg.solid_frac   = 0.50;
-cfg.coneDeg      = [15 15 15];
+cfg.coneDeg      = [90 90 90];
 cfg.rngSeed      = 1;
-cfg.sigma_vox    = 0.0;        % optional Gaussian blur strength
+cfg.sigma_vox    = 0.0;
 
-cfg.t_spin       = 2e-3;     % spinodoid relief thickness [m]
-cfg.t_base       = 1.5e-3;     % dense base thickness [m]
-cfg.tilesXY      = [3 3];      % tiling in X/Y
-cfg.add_outer_skin_vox = 0;    % perimeter sealing on the whole sheet
-cfg.slice_count  = 10;          % number of top slices to average for 2D driver
+cfg.t_spin       = 2e-3;
+cfg.t_base       = 1.5e-3;
+cfg.tilesXY      = [3 3];
+cfg.add_outer_skin_vox = 0;
+cfg.slice_count  = 8;
 
 fields = fieldnames(cfg);
 for i = 1:numel(fields)
     fn = fields{i};
-    if isfield(params, fn)
+    if isfield(params, fn) && ~isempty(params.(fn))
         cfg.(fn) = params.(fn);
     end
 end
@@ -42,13 +41,12 @@ if ~isfolder(helpersDir)
     error('Helpers directory missing: %s', helpersDir);
 end
 addpath(helpersDir);
-resultsRoot = fullfile(scriptDir, 'results', 'relief_sheets');
+resultsRoot = fullfile(scriptDir, 'results', 'sheets');
 if ~exist(resultsRoot,'dir'), mkdir(resultsRoot); end
 
-%% -------------------- Generate periodic spinodoid cell -----------------
+%% -------------------- Generate periodic field --------------------------
 rng(cfg.rngSeed);
-[phi, meta] = spinodal_periodic_field(cfg.N, cfg.L, cfg.lambda_vox, ...
-                                      cfg.bandwidth, cfg.nModes, cfg.coneDeg);
+[phi, meta] = spinodal_periodic_field(cfg.N, cfg.L, cfg.lambda_vox, cfg.bandwidth, cfg.nModes, cfg.coneDeg);
 
 if cfg.sigma_vox > 0
     phi = periodic_gaussian_blur(phi, cfg.sigma_vox);
@@ -58,21 +56,21 @@ end
 
 %% -------------------- 2D driver & extrusion ----------------------------
 slab = min(max(1, round(cfg.slice_count)), size(phi,3));
-phi2 = mean(phi(:,:,1:slab), 3);           % average a thin top slab for stability
+phi2 = mean(phi(:,:,1:slab), 3);
 phi2 = phi2 - mean(phi2(:));
 phi2 = phi2 ./ (std(phi2(:)) + eps);
 
 t2      = prctile(phi2(:), 100*cfg.solid_frac);
-mask2   = phi2 > t2;                        % 2D spinodal islands (periodic in XY)
-solidFractionCell = mean(mask2(:));         % report 2D coverage
+mask2   = phi2 > t2;
+solidFractionCell = mean(mask2(:));
 
 %% -------------------- Build layered sheet ------------------------------
 Svox = cfg.L / cfg.N;
 tsV  = max(1, round(cfg.t_spin / Svox));
-tbV  = max(3, round(cfg.t_base / Svox));   % ensure plate survives marching cubes
+tbV  = max(3, round(cfg.t_base / Svox));
 Nz   = tbV + tsV;
 
-spinLayer = repmat(mask2, 1, 1, tsV);       % pure extrusion: vertical walls, closed top
+spinLayer = repmat(mask2, 1, 1, tsV);
 baseLayer = true(cfg.N, cfg.N, tbV);
 
 sheetMask = cat(3, baseLayer, spinLayer);
@@ -101,16 +99,18 @@ spinodalType = 'anisotropic';
 if all(cfg.coneDeg >= 89)
     spinodalType = 'isotropic';
 elseif cfg.coneDeg(1) == 30 && all(cfg.coneDeg([2 3]) == 0)
-    spinodalType = 'columnar';
-elseif cfg.coneDeg(2) == 30 && all(cfg.coneDeg([1 3]) == 0)
     spinodalType = 'lamellar';
+elseif cfg.coneDeg(2) == 30 && all(cfg.coneDeg([1 3]) == 0)
+    spinodalType = 'columnar';
+elseif all(cfg.coneDeg == 15)
+    spinodalType = 'Cubic';
 end
 
 runTimestamp = datetime('now');
 runLabelBase = sprintf('sheetRelief_%s_N%d_%dx%d_t%dum_%dum', ...
-    lower(spinodalType), cfg.N, tx, ty, round(1e6*cfg.t_spin), round(1e6*cfg.t_base));
+    lower(spinodalType), cfg.N, tx, ty, round(1e6 * cfg.t_spin), round(1e6 * cfg.t_base));
 typeRoot = fullfile(resultsRoot, lower(spinodalType));
-if ~exist(typeRoot,'dir'), mkdir(typeRoot); end
+if ~exist(typeRoot, 'dir'), mkdir(typeRoot); end
 runDir = unique_run_dir(typeRoot, runLabelBase);
 [~, runFolderName] = fileparts(runDir);
 
@@ -118,7 +118,6 @@ stlFileName = sprintf('sheet_relief_spinodoid_N%d_%dx%d_L%.1fmm_t%.2f_%.2fmm.stl
     cfg.N, tx, ty, cfg.L*1e3, cfg.t_spin*1e3, cfg.t_base*1e3);
 stlPath = unique_path(fullfile(runDir, stlFileName));
 
-% Pad with one-voxel void on all sides to ensure watertight isosurface
 sheetMaskPad = cat(1, false(1,size(sheetMask,2),size(sheetMask,3)), sheetMask, false(1,size(sheetMask,2),size(sheetMask,3)));
 sheetMaskPad = cat(2, false(size(sheetMaskPad,1),1,size(sheetMaskPad,3)), sheetMaskPad, false(size(sheetMaskPad,1),1,size(sheetMaskPad,3)));
 sheetMaskPad = cat(3, false(size(sheetMaskPad,1),size(sheetMaskPad,2),1), sheetMaskPad, false(size(sheetMaskPad,1),size(sheetMaskPad,2),1));
@@ -182,7 +181,7 @@ sheetLines = {
 
 logLines = [
     {
-    'Spinodoid relief sheet run log'
+    'Spinodoid sheet run log'
     sprintf('Generated: %s', timestampStr)
     sprintf('Folder: %s', runFolderName)
     sprintf('Type: %s (periodic XY)', spinodalType)
@@ -220,7 +219,7 @@ end
 fprintf('\n---- RUN SUMMARY ----\n');
 fprintf('Folder: %s\n', runFolderName);
 fprintf('Generated: %s\n', timestampStr);
-fprintf('Type: %s (extruded relief sheet)\n', spinodalType);
+fprintf('Type: %s (sheet)\n', spinodalType);
 fprintf('Grid: %d^3, lambda_vox: %.3f, bandwidth: %.3f\n', cfg.N, cfg.lambda_vox, cfg.bandwidth);
 fprintf('Solid fraction (target / cell / sheet): %.3f / %.3f / %.3f\n', ...
         cfg.solid_frac, solidFractionCell, solidFractionSheet);
