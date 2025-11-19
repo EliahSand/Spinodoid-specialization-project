@@ -1,9 +1,8 @@
-function PSSH(params)
+function PSSCone(params)
 tStart = tic;
-%---PSSH - Periodic Spinodal Sheet Layered (relief version)----
-% Dense base slab + constant-thickness spinodoid carpet extruded from an
-% averaged 2D slice of the periodic field (identical logic to the legacy
-% make_spinodoid_relief_sheet.m script).
+% PSSCone - Sheet generator with controllable in-plane lamellar angle.
+% Mirrors PSSH (relief sheet) but allows rotating the 2-D spinodal mask by
+% lamellarAngleDeg (0° = +X, 90° = +Y).
 
 if nargin < 1
     params = struct();
@@ -13,21 +12,21 @@ cfg = struct();
 cfg.N            = 64;
 cfg.L            = 40e-3;
 cfg.lambda_vox   = 25;
-cfg.bandwidth    = 1;
+cfg.bandwidth    = 2;
 cfg.nModes       = 4000;
 cfg.solid_frac   = 0.50;
 cfg.coneDeg      = [30 0 0];
 cfg.rngSeed      = 1;
 cfg.sigma_vox    = 0.0;
 
-%%t_spin = t2    t_base = t1. t2/t2= [0.5,1,2]
-
 cfg.t_spin       = 1e-3;
 cfg.t_base       = 2e-3;
-cfg.tilesXY      = [3 2];
+cfg.tilesXY      = [1 1];
 cfg.add_outer_skin_vox = 0;
 cfg.slice_count  = 8;
 cfg.align_with_cube = true;
+cfg.lamellarAngleDeg = 0;
+cfg.resultsRoot  = [];
 
 fields = fieldnames(cfg);
 for i = 1:numel(fields)
@@ -37,17 +36,20 @@ for i = 1:numel(fields)
     end
 end
 
-%% -------------------- Paths --------------------------------------------
 scriptDir   = fileparts(mfilename('fullpath'));
 helpersDir  = fullfile(scriptDir, 'helpers');
 if ~isfolder(helpersDir)
     error('Helpers directory missing: %s', helpersDir);
 end
 addpath(helpersDir);
-resultsRoot = fullfile(scriptDir, 'results', 'sheets');
+customResultsRoot = ~isempty(cfg.resultsRoot);
+if customResultsRoot
+    resultsRoot = cfg.resultsRoot;
+else
+    resultsRoot = fullfile(scriptDir, 'results', 'sheets');
+end
 if ~exist(resultsRoot,'dir'), mkdir(resultsRoot); end
 
-%% -------------------- Generate periodic field --------------------------
 rng(cfg.rngSeed);
 [phi, meta] = spinodal_periodic_field(cfg.N, cfg.L, cfg.lambda_vox, cfg.bandwidth, cfg.nModes, cfg.coneDeg);
 
@@ -57,7 +59,6 @@ if cfg.sigma_vox > 0
     phi = phi ./ (std(phi(:)) + eps);
 end
 
-%% -------------------- Layer thickness & extraction --------------------
 Svox = cfg.L / cfg.N;
 tsV  = max(1, round(cfg.t_spin / Svox));
 tbV  = max(3, round(cfg.t_base / Svox));
@@ -71,12 +72,14 @@ if isempty(sliceMask)
     sliceMask = fullMask(:,:,end);
 end
 mask2 = mean(sliceMask, 3) >= 0.5;
+mask2 = rotate_periodic_mask(mask2, cfg.lamellarAngleDeg);
 solidFractionPattern = mean(mask2(:));
 
 spinLayer = repmat(mask2, 1, 1, tsV);
 baseLayer = true(cfg.N, cfg.N, tbV);
 
 sheetMask = cat(3, baseLayer, spinLayer);
+
 tx = cfg.tilesXY(1); ty = cfg.tilesXY(2);
 sheetMask = repmat(sheetMask, tx, ty, 1);
 
@@ -96,13 +99,12 @@ else
     Lx = cfg.L * tx;
     Ly = cfg.L * ty;
 end
+
 solidFractionBase      = mean(baseLayer(:));
 solidFractionSpinLayer = mean(spinLayer(:));
 solidFractionSheet     = mean(sheetMask(:));
-
 Lz = cfg.t_base + cfg.t_spin;
 
-%% -------------------- Export & log ------------------------------------
 spinodalType = 'anisotropic';
 if all(cfg.coneDeg >= 89)
     spinodalType = 'isotropic';
@@ -115,9 +117,16 @@ elseif all(cfg.coneDeg == 15)
 end
 
 runTimestamp = datetime('now');
-runLabelBase = sprintf('sheetRelief_%s_N%d_%dx%d_t%dum_%dum', ...
-    lower(spinodalType), cfg.N, tx, ty, round(1e6 * cfg.t_spin), round(1e6 * cfg.t_base));
-typeRoot = fullfile(resultsRoot, lower(spinodalType));
+tRatio = cfg.t_spin / max(cfg.t_base, eps);
+ratioLabel = sprintf('tr%02d', round(100 * tRatio));
+angleLabel = sprintf('ang%03d', round(cfg.lamellarAngleDeg));
+runLabelBase = sprintf('sheetCone_%s_%s_%s_N%d_%dx%d', ...
+    ratioLabel, angleLabel, lower(spinodalType), cfg.N, tx, ty);
+if customResultsRoot
+    typeRoot = resultsRoot;
+else
+    typeRoot = fullfile(resultsRoot, lower(spinodalType));
+end
 if ~exist(typeRoot, 'dir'), mkdir(typeRoot); end
 runDir = unique_run_dir(typeRoot, runLabelBase);
 [~, runFolderName] = fileparts(runDir);
@@ -172,6 +181,7 @@ manifest.var = 'sheetMask';
 manifest.spacing = voxelSizeXY;
 manifest.origin = [0 0 0];
 manifest.material = 'SPINODAL';
+manifest.notes = sprintf('Lamellar angle %.1f deg', cfg.lamellarAngleDeg);
 manifestPath = fullfile(runDir, 'mesh_manifest.json');
 try
     fidMan = fopen(manifestPath, 'w');
@@ -200,6 +210,7 @@ paramLines = {
     sprintf('  coneDeg: [%s]', num2str(cfg.coneDeg))
     sprintf('  sigma_vox: %.3f', cfg.sigma_vox)
     sprintf('  slice_count: %d', cfg.slice_count)
+    sprintf('  lamellar_angle_deg: %.1f', cfg.lamellarAngleDeg)
     sprintf('  rng_seed: %d', cfg.rngSeed)
     };
 
@@ -217,7 +228,7 @@ sheetLines = {
 
 logLines = [
     {
-    'Spinodoid sheet run log'
+    'Spinodoid sheet (rotated lamella) run log'
     sprintf('Generated: %s', timestampStr)
     sprintf('Folder: %s', runFolderName)
     sprintf('Type: %s (periodic XY)', spinodalType)
@@ -243,7 +254,7 @@ logLines = [
 
 fid = fopen(logPath, 'w');
 if fid < 0
-    warning('Unable to write run log to %s', logPath);
+    warning('Unable to write log to %s', logPath);
 else
     for i = 1:numel(logLines)
         fprintf(fid, '%s\n', logLines{i});
@@ -252,12 +263,12 @@ else
     fprintf('Logged run parameters to: %s\n', logPath);
 end
 
-fprintf('\n---- RUN SUMMARY ----\n');
+fprintf('\n---- ROTATED SHEET SUMMARY ----\n');
 fprintf('Folder: %s\n', runFolderName);
-fprintf('Generated: %s\n', timestampStr);
 fprintf('Type: %s (sheet)\n', spinodalType);
 fprintf('Grid: %d^3, lambda_vox: %.3f, bandwidth: %.3f\n', cfg.N, cfg.lambda_vox, cfg.bandwidth);
-fprintf('Solid fraction (target / cell / sheet): %.3f / %.3f / %.3f\n', ...
+fprintf('Lamellar angle: %.1f deg\n', cfg.lamellarAngleDeg);
+fprintf('Solid fraction (target / pattern / sheet): %.3f / %.3f / %.3f\n', ...
         cfg.solid_frac, solidFractionPattern, solidFractionSheet);
 fprintf('Tiles: %dx%d, STL: %s\n', tx, ty, stlPath);
 fprintf('Faces: %d, Vertices: %d\n', meshStats.numFaces, meshStats.numVertices);
@@ -267,4 +278,23 @@ if elapsedSeconds < 60
 else
     fprintf('Run completed in %.2f minutes.\n', elapsedSeconds/60);
 end
+end
+
+function rotMask = rotate_periodic_mask(mask, angleDeg)
+if abs(angleDeg) < 1e-6
+    rotMask = mask;
+    return;
+end
+N = size(mask,1);
+[X,Y] = ndgrid(0:N-1, 0:N-1);
+center = (N-1)/2;
+Xc = X - center;
+Yc = Y - center;
+theta = deg2rad(angleDeg);
+Xr = Xc*cos(theta) - Yc*sin(theta);
+Yr = Xc*sin(theta) + Yc*cos(theta);
+Xr = mod(Xr + center, N);
+Yr = mod(Yr + center, N);
+F = griddedInterpolant({0:N-1,0:N-1}, double(mask), 'nearest', 'nearest');
+rotMask = F(Xr, Yr) >= 0.5;
 end

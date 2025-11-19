@@ -118,14 +118,41 @@ if ~exist(typeRoot,'dir'), mkdir(typeRoot); end
 runDir = unique_run_dir(typeRoot, runLabelBase);
 [~, runFolderName] = fileparts(runDir);
 
-stlFileName = sprintf('spinodoid_TILED_N%d_sf%02d_%dx%dx%d.stl', ...
-    N, round(100*solid_frac), tx, ty, tz);
-stlPath = unique_path(fullfile(runDir, stlFileName));
+stlPath = unique_path(fullfile(runDir, 'cube_tiled.stl'));
+[~, stlFileName, ext] = fileparts(stlPath);
+stlFileName = [stlFileName ext];
 
 % IMPORTANT: use voxel size, not box length, for physical spacing
 voxelSize = L / N;
 meshStats = binary_to_watertight_stl(tiledMask, voxelSize, stlPath);
 fprintf('Wrote STL: %s\n', stlPath);
+
+[matDir, matBase] = fileparts(stlPath);
+matPath = fullfile(matDir, sprintf('%s.mat', matBase));
+voxelSpacing = voxelSize;
+tileCounts = [tx ty tz];
+save(matPath, 'tiledMask', 'voxelSpacing', 'tileCounts', '-v7.3');
+fprintf('Saved voxel mask to: %s\n', matPath);
+
+manifest = struct();
+manifest.mask = [matBase '.mat'];
+manifest.var = 'tiledMask';
+manifest.spacing = voxelSpacing;
+manifest.origin = [0 0 0];
+manifest.material = 'SPINODAL';
+manifestPath = fullfile(runDir, 'mesh_manifest.json');
+try
+    fidMan = fopen(manifestPath, 'w');
+    if fidMan < 0
+        warning('Unable to write manifest to %s', manifestPath);
+    else
+        fprintf(fidMan, '%s', jsonencode(manifest));
+        fclose(fidMan);
+        fprintf('Wrote manifest to: %s\n', manifestPath);
+    end
+catch ME
+    warning('Failed to write manifest: %s', ME.message);
+end
 
 % Run log
 logPath = fullfile(runDir, 'run_log.txt');

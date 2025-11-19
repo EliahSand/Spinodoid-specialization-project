@@ -1,10 +1,10 @@
 function main()
 tStart = tic;
 % ------------------------- Design knobs ---------------------------------------
-N            = 64;        % grid size (NxNxN). Use powers of two for speed
+N            = 128;        % grid size (NxNxN). Use powers of two for speed
 L            = 0.2;        % physical box length (mm)
 lambda_vox   = 32;         % target feature wavelength in voxels (~rib/ligament spacing)
-bandwidth    = 0.7;       % relative shell thickness around target |k| (0.1–0.3)
+bandwidth    = 0.4;       % relative shell thickness around target |k| (0.1–0.3)
 nModes       = 4000;       % number of Fourier modes to sample (1k–10k typical)
 solid_frac   = 0.5;        % volume fraction of SOLID after threshold (0..1)
 coneDeg      = [90 90 90]; % cone half-angles about x,y,z (90= isotropic). e.g. [90 90 90]
@@ -69,7 +69,7 @@ elseif coneDeg(1) == 30 && all(coneDeg([2 3]) == 0)
     spinodalType = 'lamellar';
 elseif coneDeg(2) == 30 && all(coneDeg([1 3]) == 0)
     spinodalType = 'columnar';
-elseif all(cfg.coneDeg == 15)
+elseif all(coneDeg == 30)
     spinodalType = 'cubic';
 end
 
@@ -86,21 +86,40 @@ end
 if ~exist(runDir, 'dir'), mkdir(runDir); end
 [~, runFolderName] = fileparts(runDir);
 
-stlFileName = sprintf('spinodoid_N%d_sf%02d_vox.stl', N, round(100*solid_frac));
-stlPath = fullfile(runDir, stlFileName);
-if isfile(stlPath)
-    [folder, base, ext] = fileparts(stlPath);
-    v = 1;
-    while isfile(fullfile(folder, sprintf('%s_v%d%s', base, v, ext)))
-        v = v + 1;
-    end
-    stlPath = fullfile(folder, sprintf('%s_v%d%s', base, v, ext));
-    [~, stlFileName, ext] = fileparts(stlPath);
-    stlFileName = [stlFileName ext];
-end
+baseName = 'cube';
+stlPath = unique_path(fullfile(runDir, sprintf('%s.stl', baseName)));
+[~, stlFileName, ext] = fileparts(stlPath);
+stlFileName = [stlFileName ext];
 
 meshStats = binary_to_watertight_stl(solidMask, L, stlPath);
 fprintf('Wrote file to: %s\n', stlPath);
+
+[matDir, matBase] = fileparts(stlPath);
+matPath = fullfile(matDir, sprintf('%s.mat', matBase));
+voxelSpacing = L / N;
+origin = [0 0 0];
+save(matPath, 'solidMask', 'voxelSpacing', 'origin', '-v7.3');
+fprintf('Saved voxel mask to: %s\n', matPath);
+
+manifest = struct();
+manifest.mask = [matBase '.mat'];
+manifest.var = 'solidMask';
+manifest.spacing = voxelSpacing;
+manifest.origin = origin;
+manifest.material = 'SPINODAL';
+manifestPath = fullfile(runDir, 'mesh_manifest.json');
+try
+    fidMan = fopen(manifestPath, 'w');
+    if fidMan < 0
+        warning('Unable to write manifest to %s', manifestPath);
+    else
+        fprintf(fidMan, '%s', jsonencode(manifest));
+        fclose(fidMan);
+        fprintf('Wrote manifest to: %s\n', manifestPath);
+    end
+catch ME
+    warning('Failed to write manifest: %s', ME.message);
+end
 
 logPath = fullfile(runDir, 'run_log.txt');
 timestampStr = datestr(runTimestamp, 'dd-mmm-yyyy HH:MM:SS');
@@ -165,8 +184,6 @@ else
     fclose(fid);
     fprintf('Logged run parameters to: %s\n', logPath);
 end
-
-%save(fullfile(resultsRoot,'isotropic','spinov2','solidMask.mat'),'solidMask','-v7.3');
 
 fprintf('\n---- RUN SUMMARY ----\n');
 fprintf('Folder: %s\n', runFolderName);

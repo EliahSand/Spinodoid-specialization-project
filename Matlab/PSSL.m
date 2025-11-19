@@ -104,14 +104,9 @@ if ~exist(typeRoot,'dir'), mkdir(typeRoot); end
 runDir = unique_run_dir(typeRoot, runLabelBase);
 [~, runFolderName] = fileparts(runDir);
 
-if isPeriodic
-    stlFileName = sprintf('spinodoid_STENT_RELIEF_PERIODIC_Ri%03dum_Ro%03dum_H%03dum_tp%d_tiles%d.stl', ...
-        round(1e6*cfg.Ri), round(1e6*cfg.Ro), round(1e6*cfg.H), cfg.theta_partitions, cfg.tilesAxial);
-else
-    stlFileName = sprintf('spinodoid_STENT_RELIEF_Ri%03dum_Ro%03dum_H%03dum.stl', ...
-        round(1e6*cfg.Ri), round(1e6*cfg.Ro), round(1e6*cfg.H));
-end
-stlPath = unique_path(fullfile(runDir, stlFileName));
+stlPath = unique_path(fullfile(runDir, 'stent_relief.stl'));
+[~, stlFileName, ext] = fileparts(stlPath);
+stlFileName = [stlFileName ext];
 
 thetaVec = linspace(0, 2*pi, Nt+1); thetaVec(end) = [];
 if NzTotal > 1
@@ -149,6 +144,38 @@ meshStats.numVertices = size(fv.vertices,1);
 
 stlwrite_ascii(stlPath, fv.vertices, fv.faces);
 fprintf('Wrote STL: %s\n', stlPath);
+
+[matDir, matBase] = fileparts(stlPath);
+matPath = fullfile(matDir, sprintf('%s.mat', matBase));
+maskTheta = thetaVec;
+maskZ = zVec;
+maskR = rVec;
+save(matPath, 'stentMask', 'maskTheta', 'maskZ', 'maskR', '-v7.3');
+fprintf('Saved voxel mask to: %s\n', matPath);
+
+thetaSpacing = 2*pi * ((cfg.Ri + cfg.Ro)/2) / Nt;
+axialSpacing = HTotal / NzTotal;
+radialSpacing = (cfg.Ro - cfg.Ri) / max(1, cfg.Nr - 1);
+manifest = struct();
+manifest.mask = [matBase '.mat'];
+manifest.var = 'stentMask';
+manifest.spacing = [thetaSpacing axialSpacing radialSpacing];
+manifest.origin = [0 0 0];
+manifest.material = 'SPINODAL';
+manifest.notes = 'Axes correspond to [theta, z, r] in cylindrical coordinates.';
+manifestPath = fullfile(runDir, 'mesh_manifest.json');
+try
+    fidMan = fopen(manifestPath, 'w');
+    if fidMan < 0
+        warning('Unable to write manifest to %s', manifestPath);
+    else
+        fprintf(fidMan, '%s', jsonencode(manifest));
+        fclose(fidMan);
+        fprintf('Wrote manifest to: %s\n', manifestPath);
+    end
+catch ME
+    warning('Failed to write manifest: %s', ME.message);
+end
 
 %% Logging
 logPath = fullfile(runDir, 'run_log.txt');
