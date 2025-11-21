@@ -37,5 +37,6 @@ for r = ratios
 end
 % Record the elapsed time for the sweep
 elapsedTime = toc(tStart);
+fprintf('----------------------------------------------')
 fprintf('---- Total elapsed time for sweep: %.2f seconds\n ', elapsedTime);
 end
