@@ -1,42 +1,52 @@
 # Spinodoid-specialization-project
+Author: Eliah Sand (NTNU, 2025)
 
-Workflow and tooling for generating spinodoid unit cells, tiling them into larger lattices, and exporting watertight STL meshes for downstream CAD/FEA studies.
+End-to-end pipeline for generating periodic spinodoid lattices (cells, sheets, stents), exporting meshes, and running Abaqus solid/shell simulations with mid-plane probes.
 
-## MATLAB generators
+## Theory (periodic GRF)
 
-- `Matlab/main.m` – entry point for creating a single periodic spinodoid cell (cubes).
-- `Matlab/main_cubed.m` – formerly the tiler; replicates the `main` cube along X/Y/Z and fuses seams.
-- `Matlab/PSSH.m` – *Periodic Spinodal Sheet Layered*: dense base slab with an extruded spinodal layer.
-- `Matlab/PSS.m` – *Periodic Spinodal Stent*: cylindrical spinodal stent with angular periodization (`theta_partitions`) and optional axial tiling (`tilesAxial`).
-- `Matlab/PSSL.m` – *Periodic Spinodal Stent Layered*: dense inner wall + spinodal relief outer layer, sharing the same periodization controls.
+The spinodal field is synthesized in Fourier space as a periodic Gaussian random field:
+$$
+\phi(\mathbf{x}) = \sum_{m=1}^{M} a_m \cos\!\left( \frac{2\pi}{L}\, \mathbf{k}_m \!\cdot\! \mathbf{x} + \gamma_m \right),
+$$
+with $\mathbf{k}_m = (i,j,k) \frac{2\pi}{L}$ and integer $(i,j,k)$. Every mode divides the box length $L$, so values and derivatives match on opposite faces:
+$$
+\phi(0,y,z) = \phi(L,y,z), \quad \partial_x \phi(0,y,z)=\partial_x \phi(L,y,z),
+$$
+and similarly for $y,z$. Stent variants build the field in $(\theta,z,r)$ with $k_\theta=n$ to enforce angular periodicity; padding/wrapping yields watertight cylindrical masks.
 
-Each script writes its STL plus a `run_log.txt` into `Matlab/results/<subfolder>/run_<timestamp>` so every dataset stays reproducible (parameters, mesh stats, RNG seeds, etc.).
+A percentile threshold converts $\phi$ to a binary mask; an isosurface of that mask becomes the STL. Periodicity → tileable geometry and clean PBCs.
 
-## Requirements
+## Generation workflow (MATLAB)
 
-- MATLAB R2022b+ (parallel FFTs benefit from newer releases)
-- Image Processing Toolbox (optional; only needed for connectivity pruning)  
-- GPU support is automatic when a CUDA-capable device is present for `tile_spinodoid`.
+- Generators live under `Matlab/` (see Matlab/README.md for details and commands).
+- Each run writes `results/.../run_<timestamp>/` containing:
+  - STL
+  - `run_log.txt` (parameters, thicknesses, spacing, solid fractions)
+  - Mask `.mat` (logical volume + spacing/origin; sheets include `zVoxelThickness`)
+  - `mesh_manifest.json` pointing to the mask/variable
 
-## Results
+## Mesh conversion (Python)
 
-Generated meshes land under `Matlab/results/` in generator-specific subfolders:
+- Solids (voxel C3D8):  
+  - Single: `python exp/mat_to_inp.py --mat <mask>.mat --var <var> --spacing <L/N>`  
+  - Batch: `python exp/batch_mat_to_inp.py --roots Matlab/results --overwrite`
+- Shells (S4R):  
+  - Single: `python exp/mat_to_shell_inp.py --mat Matlab/results/.../sheet.mat --var sheetMask`  
+  - Batch: `python exp/batch_mat_to_shell_inp.py --roots Matlab/results --overwrite`  
+    Uses `t_base_mm` / `t_spin_mm` from `run_log.txt` when present.
 
-- `results/cells/` – single cubes (`main.m`)
-- `results/tiled/` – cubic tilings (`main_cubed.m`)
-- `results/sheets/` – layered sheets (`PSSH.m`)
-- `results/stents/single|periodic/<type>/` – spinodal stents classified by whether `theta_partitions` or `tilesAxial` exceed 1 (`PSS.m`)
-- `results/stent_relief/single|periodic/<type>/` – layered stents, likewise split into single vs periodized (`PSSL.m`)
+## Abaqus runners (CAE noGUI)
 
-Each run folder contains the STL and a matching log capturing parameters, mesh counts, and solid fractions.
+- Solids: `abaqus cae noGUI=exp/run_spinodal_static.py -- <solid.inp>`  
+  Batch: `python exp/batch_run_spinodal_solid.py --roots Matlab/results --overwrite`
+- Shells: `abaqus cae noGUI=exp/run_spinodal_shell_static.py -- <shell.inp>`  
+  Batch: `python exp/batch_run_spinodal_shell.py --roots Matlab/results --overwrite`
 
-### Voxel meshing for Abaqus
+Outputs: ODB + mid-plane CSV/RPT under each run’s `FEA/` or `FEA_shell/`. Use `--dry-run` on batch tools to preview commands.
 
-If you need a voxelized C3D8 mesh for Abaqus without installing extra Python packages, export the MATLAB mask (e.g., `solidMask`, `stentMask`) to a `.mat` file and run:
+## Folder map
 
-```bash
-python exp/mat_to_inp.py --mat solidMask.mat --var solidMask --spacing <L/N> \
-    --peel 3 --output exp/results/spinodal_mesh.inp --density 1100 --elastic 2.5e9 0.3
-```
-
-The script depends only on NumPy + SciPy (plus h5py for v7.3 .mat files) and produces an Abaqus-ready voxel mesh.
+- `Matlab/` – generators, helpers, README (usage and file management)
+- `exp/` – converters (`mat_to_inp.py`, `mat_to_shell_inp.py`), runners, batch tools
+- `Matlab/results/` – generated datasets (STL, run_log.txt, mask .mat, manifest, FEA outputs)

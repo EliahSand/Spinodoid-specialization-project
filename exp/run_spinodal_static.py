@@ -175,7 +175,7 @@ def extract_midplane_results(odb_path, fea_dir):
         min_dx = min(dx_list)
     else:
         min_dx = span
-    slice_half = max(0.1 * min_dx, 1e-9)
+    slice_half = max(0.01 * min_dx, 1e-9)
 
     try:
         step = odb.steps['LoadStep']
@@ -248,14 +248,12 @@ def extract_midplane_results(odb_path, fea_dir):
             mises = 0.0
         mises_dict[key] = mises
 
-    # Determine optional z-threshold from base nodes (keep below this)
+    # Determine base z-levels; keep only the bottom surface of the base layer
     if base_nodes:
         base_z = [instance.nodes[node_label-1].coordinates[2] for (_inst, node_label) in base_nodes if _inst == inst_name]
         base_z_min = min(base_z) if base_z else None
-        base_z_max = max(base_z) if base_z else None
     else:
-        base_z_min = None
-        base_z_max = None
+        base_z_min = min(node.coordinates[2] for node in instance.nodes)
 
     rows = []
     for node in instance.nodes:
@@ -266,9 +264,7 @@ def extract_midplane_results(odb_path, fea_dir):
             continue
         if spin_z_min is not None and node.coordinates[2] >= spin_z_min - 1e-9:
             continue
-        if base_z_min is not None and node.coordinates[2] < base_z_min - 1e-9:
-            continue
-        if base_z_max is not None and node.coordinates[2] > base_z_max + 1e-9:
+        if base_z_min is not None and node.coordinates[2] > base_z_min + 1e-9:
             continue
         x = node.coordinates[0]
         if abs(x - x_mid) > slice_half:

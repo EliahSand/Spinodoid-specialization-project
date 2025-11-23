@@ -2,7 +2,7 @@ function run_PSSCone_sweep()
 % RUN_PSSCONe_SWEEP  Batch runner for PSSCone with multiple lamellar angles
 % and thickness ratios. Creates results under results/sheets/lamellar/trXX.
 
-tStart = tic;
+tic
 
 scriptDir = fileparts(mfilename('fullpath'));
 resultsBase = fullfile(scriptDir, 'results', 'sheets', 'lamellar');
@@ -35,8 +35,7 @@ for r = ratios
         PSSCone(params);
     end
 end
-% Record the elapsed time for the sweep
-elapsedTime = toc(tStart);
-fprintf('----------------------------------------------')
-fprintf('---- Total elapsed time for sweep: %.2f seconds\n ', elapsedTime);
+fprintf('---------------------------------------------- \n')
+fprintf('FINISHED SWEEP\n')
+toc
 end
