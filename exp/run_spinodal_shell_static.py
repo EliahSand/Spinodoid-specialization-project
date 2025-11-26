@@ -42,12 +42,51 @@ def parse_input_paths():
         cli_args = args[idx + 1:]
     else:
         cli_args = args[1:]
+    # Filter out known flags that Abaqus injects (e.g., "-cae"), but keep other tokens (they may belong to spaced paths).
+    skip_flags = set(['-cae', '-mesa'])
+    filtered = []
+    i = 0
+    while i < len(cli_args):
+        p = cli_args[i]
+        pl = p.lower()
+        if pl in skip_flags:
+            i += 1
+            continue
+        if pl == '-lmlog':
+            i += 1  # skip the log path token if present
+            if i < len(cli_args) and not cli_args[i].lower().endswith('.inp'):
+                i += 1
+            continue
+        if pl.startswith('-nogui') or 'nogui=' in pl:
+            i += 1
+            continue
+        if pl.startswith('-') and not os.path.isfile(p):
+            i += 1
+            continue
+        filtered.append(p)
+        i += 1
+    cli_args = filtered
     if not cli_args:
         raise ValueError('Usage: abaqus cae noGUI=exp/run_spinodal_shell_static.py -- <mesh.inp> [...]')
-    inp_paths = [os.path.abspath(p) for p in cli_args]
-    for p in inp_paths:
-        if not os.path.isfile(p):
-            raise IOError('Input file not found: %s' % p)
+
+    # Reconstruct paths that may have been split on spaces (e.g., OneDrive paths).
+    inp_paths = []
+    i = 0
+    while i < len(cli_args):
+        found = None
+        for j in range(len(cli_args), i, -1):
+            cand = ' '.join(cli_args[i:j])
+            if cand.lower().endswith('.inp') and os.path.isfile(cand):
+                found = cand
+                i = j
+                break
+        if found:
+            inp_paths.append(os.path.abspath(found))
+            continue
+        i += 1
+
+    if not inp_paths:
+        raise IOError('No valid input files found; checked: %s' % (' '.join(cli_args)))
     return inp_paths
 
 

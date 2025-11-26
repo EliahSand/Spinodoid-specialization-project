@@ -1,4 +1,18 @@
-Tid for første abaqus kjøring med shell omlag 25 min
+Tid for første abaqus kjøring med shell: Batch complete in 1010.7 seconds (16.85 minutes) (67,3 sekund pr)
 
 
-Tid for første abaqus kjøring med shell omlag xx min
+Tid for første abaqus kjøring med solid: 23 min 
+
+tr100
+	•	ang000 skipped (ODB already exists)
+	•	ang030, ang045, ang060, ang090 all run successfully (~136–139s each)
+	•	tr200
+	•	All angles (000, 030, 045, 060, 090) crash with:
+ABAQUS/ABQcaeK rank 0 received the ABORT signal — ERROR CATEGORY: CAE
+	•	Despite the error, each run still completes batch-logging (170–179s)
+	•	tr50
+	•	All angles skipped (all ODBs already exist)
+
+
+
+Alle t_200 ferdig på 630 sekund
