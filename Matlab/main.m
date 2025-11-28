@@ -1,10 +1,10 @@
 function main()
 tStart = tic;
 % ------------------------- Design knobs ---------------------------------------
-N            = 128;        % grid size (NxNxN). Use powers of two for speed
+N            = 128*2;        % grid size (NxNxN). Use powers of two for speed
 L            = 0.2;        % physical box length (mm)
 lambda_vox   = 32;         % target feature wavelength in voxels (~rib/ligament spacing)
-bandwidth    = 0.4;       % relative shell thickness around target |k| (0.1–0.3)
+bandwidth    = 0.4/2;       % relative shell thickness around target |k| (0.1–0.3)
 nModes       = 4000;       % number of Fourier modes to sample (1k–10k typical)
 solid_frac   = 0.5;        % volume fraction of SOLID after threshold (0..1)
 coneDeg      = [90 90 90]; % cone half-angles about x,y,z (90= isotropic). e.g. [90 90 90]

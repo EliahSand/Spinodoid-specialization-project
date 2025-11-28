@@ -1,1 +1,0 @@
-"""Data analysis package for SOLID vs SHELL comparisons."""
