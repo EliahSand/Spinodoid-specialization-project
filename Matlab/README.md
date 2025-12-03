@@ -1,6 +1,6 @@
 # MATLAB Spinodal Generators
 
-This folder hosts the spinodoid generators and their outputs; theory lives in the top-level README.
+This folder hosts the spinodoid generators and their outputs.
 
 ## Generators
 - `main.m` – single periodic cell (cube)
