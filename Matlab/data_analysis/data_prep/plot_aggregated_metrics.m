@@ -15,7 +15,9 @@ metricNames = {'MAE', 'RMSE', 'MeanRel'};
 
 nTr = numel(trLabels);
 nTheta = numel(thetasDeg);
-trVals = cellfun(@(s) sscanf(s, 'tr%d'), trLabels);
+trVals = cellfun(@(s) sscanf(s, 'tr%d'), trLabels) / 100;
+ratioLabels = arrayfun(@(v) format_ratio_value(v), trVals, 'UniformOutput', false);
+angleLabels = arrayfun(@(a) sprintf('%d%c', a, char(176)), thetasDeg, 'UniformOutput', false);
 
 data = struct();
 for f = 1:numel(fieldsKey)
@@ -48,7 +50,8 @@ for hf = 1:numel(heatmapFields)
     field = heatmapFields{hf};
     fig = figure('Visible', 'off');
     tl = tiledlayout(fig, 1, numel(heatmapMetrics), 'TileSpacing', 'compact', 'Padding', 'compact');
-    title(tl, sprintf('Heatmaps for %s', field), 'FontWeight', 'bold');
+    fieldLabel = format_field_label(field);
+    title(tl, sprintf('Heatmaps for %s', fieldLabel), 'FontWeight', 'bold', 'Interpreter', 'tex');
     subtitle(tl, 'Rows: thickness ratio (larger = thicker); Columns: angle');
 
     hasData = false;
@@ -63,7 +66,7 @@ for hf = 1:numel(heatmapFields)
         set(ax, 'YDir', 'normal');
         xlabel(ax, 'Lamellar angle (deg)');
         ylabel(ax, 'Thickness ratio');
-        title(ax, sprintf('%s %s', field, metric));
+        title(ax, sprintf('%s %s', fieldLabel, metric), 'Interpreter', 'tex');
         colorbar(ax);
     end
     if hasData
@@ -72,43 +75,15 @@ for hf = 1:numel(heatmapFields)
     close(fig);
 end
 
-% 3D surfaces for key components (smoother shading, contour projection)
-surfFields = {'U3', 'S11'};
-surfMetrics = {'MAE', 'MeanRel'};
-for sf = 1:numel(surfFields)
-    field = surfFields{sf};
-    fig = figure('Visible', 'off');
-    tl = tiledlayout(fig, 1, numel(surfMetrics), 'TileSpacing', 'compact', 'Padding', 'compact');
-    title(tl, sprintf('Surface summary for %s', field), 'FontWeight', 'bold');
-    [TT, AA] = meshgrid(thetasDeg, trVals);
-    for sm = 1:numel(surfMetrics)
-        metric = surfMetrics{sm};
-        if ~isfield(data.(field), metric)
-            continue;
-        end
-        mat = data.(field).(metric);
-        ax = nexttile(tl);
-        surf(ax, AA, TT, mat, 'EdgeColor', 'none', 'FaceColor', 'interp', 'FaceAlpha', 0.9);
-        hold(ax, 'on');
-        contour3(ax, AA, TT, mat, 8, 'k-', 'LineWidth', 0.6);
-        xlabel(ax, 'Thickness ratio');
-        ylabel(ax, 'Lamellar angle (deg)');
-        zlabel(ax, metric);
-        title(ax, sprintf('%s %s', field, metric));
-        colorbar(ax);
-        grid(ax, 'on');
-        view(ax, 140, 30);
-    end
-    exportgraphics(fig, fullfile(outDir, sprintf('surface_%s.png', lower(field))), 'Resolution', 300);
-    close(fig);
-end
-
     function makeLines(field, vsRatio, fileName)
         fig = figure('Visible', 'off');
         tl = tiledlayout(fig, 1, numel(metricNames), 'TileSpacing', 'compact', 'Padding', 'compact');
         xLabelText = ternary(vsRatio, 'Thickness ratio', 'Lamellar angle (deg)');
-        title(tl, sprintf('%s aggregated (%s)', field, ternary(vsRatio, 'vary ratio', 'vary angle')), 'FontWeight', 'bold');
-        subtitle(tl, sprintf('Metrics across tr \\in [%s], \\theta \\in [%s]', strjoin(trLabels, ', '), num2str(thetasDeg)));
+        fieldLabel = format_field_label(field);
+        title(tl, sprintf('%s aggregated (%s)', fieldLabel, ternary(vsRatio, 'vary ratio', 'vary angle')), ...
+            'FontWeight', 'bold', 'Interpreter', 'tex');
+        subtitle(tl, sprintf('Metrics across r \\in [%s], \\theta \\in [%s]', ...
+            strjoin(ratioLabels, ', '), strjoin(angleLabels, ', ')));
 
         for m = 1:numel(metricNames)
             metric = metricNames{m};
@@ -117,17 +92,17 @@ end
             hold(ax, 'on');
             if vsRatio
                 for jTh = 1:nTheta
-                    plot(ax, trVals, mat(:, jTh), '-o', 'DisplayName', sprintf('\\theta = %d°', thetasDeg(jTh)));
+                    plot(ax, trVals, mat(:, jTh), '-o', 'DisplayName', sprintf('\\theta = %s', angleLabels{jTh}));
                 end
             else
                 for iTr = 1:nTr
-                    plot(ax, thetasDeg, mat(iTr, :), '-o', 'DisplayName', sprintf('%s', trLabels{iTr}));
+                    plot(ax, thetasDeg, mat(iTr, :), '-o', 'DisplayName', ratioLabels{iTr});
                 end
             end
             grid(ax, 'on');
             xlabel(ax, xLabelText);
             ylabel(ax, metric);
-            title(ax, sprintf('%s %s', field, metric));
+            title(ax, sprintf('%s %s', fieldLabel, metric), 'Interpreter', 'tex');
             legend(ax, 'Location', 'bestoutside');
         end
 
@@ -141,5 +116,14 @@ if cond
     out = a;
 else
     out = b;
+end
+end
+
+function label = format_ratio_value(val)
+if abs(round(val) - val) < 1e-9
+    label = sprintf('%d', round(val));
+else
+    label = sprintf('%.2g', val);
+    label = strrep(label, ' ', '');
 end
 end

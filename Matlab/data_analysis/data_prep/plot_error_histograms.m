@@ -13,7 +13,8 @@ ensure_dir(outDir);
 
 % Strip down to the most telling field for curvature: U3 only.
 fieldsList = {'U3'};
-modelTag = sprintf('%s | \\theta = %d°', trLabel, thetaDeg);
+ratioLabel = format_ratio_label(trLabel);
+modelTag = sprintf('%s | \\theta = %d°', ratioLabel, thetaDeg);
 
 maxMAEField = fieldsList{1};
 maxRelField = fieldsList{1};
@@ -27,11 +28,14 @@ makeFigure(true, 'hist_rel_errors.png', maxRelField);
         tl = tiledlayout(fig, 1, 1, 'TileSpacing', 'compact', 'Padding', 'compact');
 
         if isRelative
-            title(tl, sprintf('Relative error histogram — %s', modelTag), 'FontWeight', 'bold');
+            title(tl, sprintf('Relative error histogram — %s', modelTag), ...
+                'FontWeight', 'bold', 'Interpreter', 'tex');
         else
-            title(tl, sprintf('Absolute error histogram — %s', modelTag), 'FontWeight', 'bold');
+            title(tl, sprintf('Absolute error histogram — %s', modelTag), ...
+                'FontWeight', 'bold', 'Interpreter', 'tex');
         end
-        subtitle(tl, sprintf('Highlighted: %s', highlightField));
+        subtitle(tl, sprintf('Highlighted: %s', format_field_label(highlightField)), ...
+            'Interpreter', 'tex');
 
         ax = nexttile(tl);
 
@@ -53,7 +57,9 @@ makeFigure(true, 'hist_rel_errors.png', maxRelField);
             mark = " ★";
         end
         m = metrics.(name);
-        title(ax, sprintf('%s%s (MAE=%.3g, MaxRel=%.3g)', name, mark, m.MAE, m.MaxRel));
+        fieldLabel = format_field_label(name);
+        title(ax, sprintf('%s%s (MAE=%.3g, MaxRel=%.3g)', fieldLabel, mark, m.MAE, m.MaxRel), ...
+            'Interpreter', 'tex');
         if isRelative
             xlabel(ax, '|(Shell - Solid)/(Solid)|');
         else

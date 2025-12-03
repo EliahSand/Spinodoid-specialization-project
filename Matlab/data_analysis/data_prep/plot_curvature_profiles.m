@@ -18,10 +18,12 @@ fieldsList = {'U1','U2','U3','S11','S22','SMises'};
 solid = solid(sortIdx, :);
 shell = shell(sortIdx, :);
 
+ratioLabel = format_ratio_label(trLabel);
 nFields = numel(fieldsList);
 fig = figure('Visible', 'off');
 tl = tiledlayout(fig, nFields, 2, 'TileSpacing', 'compact', 'Padding', 'compact');
-title(tl, sprintf('Solid vs shell profiles — %s | \\theta = %d°', trLabel, thetaDeg), 'FontWeight', 'bold');
+title(tl, sprintf('Solid vs shell profiles — %s | \\theta = %d°', ratioLabel, thetaDeg), ...
+    'FontWeight', 'bold', 'Interpreter', 'tex');
 subtitle(tl, 'Left: overlay; Right: |shell - solid|', 'FontSize', 10);
 
 for i = 1:nFields
@@ -36,9 +38,11 @@ for i = 1:nFields
     plot(ax1, coords, shVal, '-r', 'LineWidth', 1.5, 'DisplayName', 'Shell');
     grid(ax1, 'on');
     xlabel(ax1, coordLabel);
-    ylabel(ax1, fname);
+    fieldLabel = format_field_label(fname);
+    ylabel(ax1, fieldLabel, 'Interpreter', 'tex');
     m = metrics.(fname);
-    title(ax1, sprintf('%s (R=%.3f, MAE=%.3g)', fname, m.R, m.MAE), 'FontSize', 11);
+    title(ax1, sprintf('%s (R=%.3f, MAE=%.3g)', fieldLabel, m.R, m.MAE), ...
+        'FontSize', 11, 'Interpreter', 'tex');
     legend(ax1, 'Location', 'best');
 
     % Absolute error
@@ -46,8 +50,9 @@ for i = 1:nFields
     plot(ax2, coords, err, '-b', 'LineWidth', 1.2);
     grid(ax2, 'on');
     xlabel(ax2, coordLabel);
-    ylabel(ax2, sprintf('|d%s|', fname));
-    title(ax2, sprintf('%s error (Max=%.3g)', fname, max(err, [], 'omitnan')), 'FontSize', 11);
+    ylabel(ax2, sprintf('|\\Delta %s|', fieldLabel), 'Interpreter', 'tex');
+    title(ax2, sprintf('%s error (Max=%.3g)', fieldLabel, max(err, [], 'omitnan')), ...
+        'FontSize', 11, 'Interpreter', 'tex');
 end
 
 exportgraphics(fig, fullfile(outDir, 'profiles_overlay.png'), 'Resolution', 300);

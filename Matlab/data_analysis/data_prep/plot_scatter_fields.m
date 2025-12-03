@@ -16,7 +16,8 @@ displacementFields = {'U1', 'U2', 'U3'};
 normalStressFields = {'S11', 'S22', 'S33', 'SMises'};
 shearStressFields = {'S12', 'S13', 'S23'};
 
-modelTag = sprintf('%s | \\theta = %d°', trLabel, thetaDeg);
+ratioLabel = format_ratio_label(trLabel);
+modelTag = sprintf('%s | \\theta = %d°', ratioLabel, thetaDeg);
 
 % Displacements: give extra padding so the title does not overlap axes
 makeScatterFigure(displacementFields, 'Displacements', 'scatter_displacements.png', 3, 'compact', 'loose', 12);
@@ -30,8 +31,9 @@ makeScatterFigure(shearStressFields, 'Stresses (shear)', 'scatter_stresses_shear
         nRows = ceil(n / nCols);
         fig = figure('Visible', 'off');
         tl = tiledlayout(fig, nRows, nCols, 'TileSpacing', spacing, 'Padding', padding);
-        title(tl, sprintf('%s — %s', figLabel, modelTag), 'FontWeight', 'bold', 'FontSize', 12);
-        subtitle(tl, 'Shell vs. solid (45° line shown)', 'FontSize', 10);
+        title(tl, sprintf('%s — %s', figLabel, modelTag), 'FontWeight', 'bold', ...
+            'FontSize', 12, 'Interpreter', 'tex');
+        subtitle(tl, 'Shell vs. solid', 'FontSize', 10);
 
         for i = 1:n
             name = fieldList{i};
@@ -56,10 +58,11 @@ makeScatterFigure(shearStressFields, 'Stresses (shear)', 'scatter_stresses_shear
 
             % Field title plus metrics on a second line
             m = metrics.(name);
-            title(ax, {name; sprintf('R=%.3f  MAE=%.3g', m.R, m.MAE)}, ...
-                'FontSize', 10, 'Interpreter', 'none');
-            xlabel(ax, 'Solid');
-            ylabel(ax, 'Shell');
+            fieldLabel = format_field_label(name);
+            title(ax, {fieldLabel; sprintf('R=%.3f  MAE=%.3g', m.R, m.MAE)}, ...
+                'FontSize', 10, 'Interpreter', 'tex');
+            xlabel(ax, sprintf('%s (solid)', fieldLabel), 'Interpreter', 'tex');
+            ylabel(ax, sprintf('%s (shell)', fieldLabel), 'Interpreter', 'tex');
 
         end
 

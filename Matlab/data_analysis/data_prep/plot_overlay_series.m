@@ -19,6 +19,9 @@ for fIdx = 1:numel(fields)
         if isempty(data.thetaDeg)
             continue;
         end
+        fieldLabel = format_field_label(fieldName);
+        ratioLabel = format_ratio_label(trLabel);
+
         fig = figure('Visible', 'off');
         ax = axes(fig);
         hold(ax, 'on');
@@ -39,19 +42,18 @@ for fIdx = 1:numel(fields)
             pad = 0.05 * diff(lims);
             lims = lims + [-pad, pad];
         end
-        plot(ax, lims, lims, 'k--', 'LineWidth', 1.1);
+        plot(ax, lims, lims, 'k--', 'LineWidth', 1.1, 'DisplayName', 'Ideal agreement');
         xlim(ax, lims);
         ylim(ax, lims);
         grid(ax, 'on');
         axis(ax, 'square');
-        xlabel(ax, sprintf('%s Solid', fieldName));
-        ylabel(ax, sprintf('%s Shell', fieldName));
-        title(ax, sprintf('%s overlay — %s', fieldName, trLabel), 'FontWeight', 'bold');
+        xlabel(ax, sprintf('%s (solid)', fieldLabel), 'Interpreter', 'tex');
+        ylabel(ax, sprintf('%s (shell)', fieldLabel), 'Interpreter', 'tex');
+        title(ax, sprintf('%s overlay — %s', fieldLabel, ratioLabel), ...
+            'FontWeight', 'bold', 'Interpreter', 'tex');
         legend(ax, 'Location', 'bestoutside');
 
         exportgraphics(fig, fullfile(outDir, sprintf('overlay_%s_%s.png', lower(fieldName), trLabel)), 'Resolution', 300);
         close(fig);
     end
-end
-
 end

@@ -10,6 +10,7 @@ addpath(scriptDir);
 
 trLabels = {'tr50', 'tr100', 'tr200'};
 thetasDeg = [0, 30, 45, 60, 90];
+overlayFields = {'U1','U2','U3','S11','S22','SMises'};
 
 doPCA = license('test', 'statistics_toolbox') && exist('pca', 'file') == 2;
 
@@ -19,7 +20,10 @@ summaryRoot = fullfile(resultsRoot, 'summary');
 ensure_dir(analysisRoot);
 ensure_dir(summaryRoot);
 
-overlayData = struct('U1', struct(), 'U2', struct(), 'U3', struct());
+overlayData = struct();
+for fIdx = 1:numel(overlayFields)
+    overlayData.(overlayFields{fIdx}) = struct();
+end
 
 summaryTemplate = struct('trLabel', '', 'thetaDeg', NaN, 'metrics', [], ...
     'status', 'pending', 'dispAccept', false, 'stressAccept', false, ...
@@ -75,8 +79,8 @@ for iTr = 1:numel(trLabels)
             summary(iTr, jTh).stressMeanRel = mean(cellfun(@(f) metrics.(f).MeanRel, stressFields));
             summary(iTr, jTh).overallScore = mean([summary(iTr, jTh).dispMeanRel, summary(iTr, jTh).stressMeanRel]);
 
-            % Store displacement data for overlay plots per thickness ratio
-            fieldsToStore = {'U1','U2','U3'};
+            % Store displacement/stress data for overlay plots per thickness ratio
+            fieldsToStore = overlayFields;
             for fIdx = 1:numel(fieldsToStore)
                 fname = fieldsToStore{fIdx};
                 if ~isfield(overlayData.(fname), trLabel)
