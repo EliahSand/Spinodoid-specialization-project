@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Convert a MATLAB spinodal sheet mask into a shell element INP.
 
-The shell mesh lives in the XY plane and uses the mask to mark spinodal
-patches; base-only cells get a thinner section while cells with spinodal
-solid get the thicker section (base + spinodal thickness).
+usage:
+
+python exp/mat_to_shell_inp.py --mat Matlab/results/.../sheet.mat --var sheetMask --spacing <voxel_size_m>
 """
 
 import argparse

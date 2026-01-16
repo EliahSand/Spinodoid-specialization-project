@@ -1,4 +1,4 @@
-Tid for første abaqus kjøring med shell: Batch complete in 1010.7 seconds (16.85 minutes) (67,3 sekund pr)
+tid kjøring full stack shell : 454 sekunder.
 
 
 Tid for første abaqus kjøring med solid: 23 min 
@@ -16,3 +16,5 @@ ABAQUS/ABQcaeK rank 0 received the ABORT signal — ERROR CATEGORY: CAE
 
 
 Alle t_200 ferdig på 630 sekund
+
+Pluss sammen etter solid^^

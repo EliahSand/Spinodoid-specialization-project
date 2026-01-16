@@ -484,7 +484,7 @@ def extract_midplane_results(odb_path, fea_dir):
 
     output_path = os.path.join(fea_dir, 'midplane_results.csv')
     with open(output_path, 'w') as fh:
-        fh.write('Label,X,Y,Z,U1,U2,U3,S11,S22,S33,S12,S13,S23,SMises\n')
+        fh.write('Label,X,Y,Z,U1,U2,U3,S_11,S_22,S_33,S_12,S_13,S_23,S_Mises\n')
         for label, coords, disp, stress, mises in rows:
             fh.write('{:d},{:.6e},{:.6e},{:.6e},{:.6e},{:.6e},{:.6e},{:.6e},{:.6e},{:.6e},{:.6e},{:.6e},{:.6e},{:.6e}\n'.format(
                 label,

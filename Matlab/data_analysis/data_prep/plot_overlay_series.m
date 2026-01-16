@@ -47,8 +47,8 @@ for fIdx = 1:numel(fields)
         ylim(ax, lims);
         grid(ax, 'on');
         axis(ax, 'square');
-        xlabel(ax, sprintf('%s (solid)', fieldLabel), 'Interpreter', 'tex');
-        ylabel(ax, sprintf('%s (shell)', fieldLabel), 'Interpreter', 'tex');
+        xlabel(ax, sprintf('%s (solid) [m]', fieldLabel), 'Interpreter', 'tex');
+        ylabel(ax, sprintf('%s (shell) [m]', fieldLabel), 'Interpreter', 'tex');
         title(ax, sprintf('%s overlay — %s', fieldLabel, ratioLabel), ...
             'FontWeight', 'bold', 'Interpreter', 'tex');
         legend(ax, 'Location', 'bestoutside');

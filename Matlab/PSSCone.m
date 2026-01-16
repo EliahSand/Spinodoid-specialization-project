@@ -1,31 +1,31 @@
 function PSSCone(params)
 tStart = tic;
 % PSSCone - Sheet generator with controllable in-plane lamellar angle.
-% Mirrors PSSH (relief sheet) but allows rotating the 2-D spinodal mask by
-% lamellarAngleDeg (0° = +X, 90° = +Y).
 
 if nargin < 1
     params = struct();
 end
 
+% ------------------------- Design knobs ---------------------------------------
+
 cfg = struct();
-cfg.N            = 64;
-cfg.L            = 40e-3;
-cfg.lambda_vox   = 25;
-cfg.bandwidth    = 2;
-cfg.nModes       = 4000;
-cfg.solid_frac   = 0.50;
-cfg.coneDeg      = [30 0 0];
-cfg.rngSeed      = 1;
+cfg.N            = 64;          % grid size (NxNxN). Use powers of two for speed
+cfg.L            = 40e-3;       % physical box length (mm)
+cfg.lambda_vox   = 25;          % target feature wavelength in voxels (~rib/ligament spacing)
+cfg.bandwidth    = 2;           % relative shell thickness around target |k| (0.1–0.3)
+cfg.nModes       = 4000;        % number of Fourier modes to sample (1k–10k typical)
+cfg.solid_frac   = 0.50;        % volume fraction of SOLID after threshold (0..1)
+cfg.coneDeg      = [30 0 0];    % cone half-angles about x,y,z (90= isotropic). e.g. [90 90 90]
+cfg.rngSeed      = 1;           % reproducible
 cfg.sigma_vox    = 0.0;
 
-cfg.t_spin       = 1e-3;
-cfg.t_base       = 2e-3;
-cfg.tilesXY      = [1 1];
+cfg.t_spin       = 1e-3;        %spinodal thickness
+cfg.t_base       = 2e-3;        %base thickness
+cfg.tilesXY      = [1 1];       %tiling for periodicity
 cfg.add_outer_skin_vox = 0;
 cfg.slice_count  = 8;
 cfg.align_with_cube = true;
-cfg.lamellarAngleDeg = 0;
+cfg.lamellarAngleDeg = 0;       %lamellar angle to x-axis
 cfg.resultsRoot  = [];
 
 fields = fieldnames(cfg);

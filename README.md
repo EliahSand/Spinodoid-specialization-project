@@ -3,19 +3,10 @@ Author: Eliah Sand (NTNU, 2025)
 
 End-to-end pipeline for generating periodic spinodoid lattices (cells, sheets, stents), exporting meshes, and running Abaqus solid/shell simulations with mid-plane probes.
 
-## Theory (periodic GRF)
-
-The spinodal field is synthesized in Fourier space as a periodic Gaussian random field:
-$$
-\phi(\mathbf{x}) = \sum_{m=1}^{M} a_m \cos\!\left( \frac{2\pi}{L}\, \mathbf{k}_m \!\cdot\! \mathbf{x} + \gamma_m \right),
-$$
-with $\mathbf{k}_m = (i,j,k) \frac{2\pi}{L}$ and integer $(i,j,k)$. Every mode divides the box length $L$, so values and derivatives match on opposite faces:
-$$
-\phi(0,y,z) = \phi(L,y,z), \quad \partial_x \phi(0,y,z)=\partial_x \phi(L,y,z),
-$$
-and similarly for $y,z$. Stent variants build the field in $(\theta,z,r)$ with $k_\theta=n$ to enforce angular periodicity; padding/wrapping yields watertight cylindrical masks.
-
-A percentile threshold converts $\phi$ to a binary mask; an isosurface of that mask becomes the STL. Periodicity → tileable geometry and clean PBCs.
+## Requierements
+- Numpy
+- Scipy
+- hp5y
 
 ## Generation workflow (MATLAB)
 

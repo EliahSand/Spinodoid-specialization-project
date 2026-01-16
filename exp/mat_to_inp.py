@@ -1,8 +1,7 @@
 """Convert a MATLAB .mat file containing a 3D logical mask into an Abaqus .inp mesh.
 
 Usage:
-    python exp/mat_to_inp.py --mat solidMask.mat --var solidMask \
-        --spacing 3.90625e-6 --peel 3 --output exp/results/spinodal_mesh.inp
+    python exp/mat_to_inp.py --mat Matlab/results/.../sheet.mat --var sheetMask --spacing <voxel_size_m>
 
 Requirements: numpy + scipy (and h5py if the .mat file is v7.3 HDF5).
 """

@@ -1,10 +1,6 @@
 #! /usr/bin/env python
 """Abaqus/CAE batch script to apply uniaxial loading on a spinodal shell mesh.
 
-Classification uses the original mask (.mat referenced by mesh_manifest.json):
-  - Map each shell element's XY centroid into the mask grid using voxel spacing.
-  - If the spinodal mask is True at that location, the element is tagged SPINODAL_SHELL; otherwise BASE_SHELL.
-Thicknesses are inferred from the MAT metadata (zVoxelThickness) or, if missing, from the mask + spacing so the base/spinodal ratio matches the solid data.
 Sections:
   BaseShellSection     -> BASE_SHELL (base layer thickness)
   SpinodalShellSection -> SPINODAL_SHELL (base + spinodal thickness)
@@ -505,7 +501,7 @@ def extract_midplane_results(odb_path, fea_dir):
 
     output_path = os.path.join(fea_dir, 'midplane_results_shell.csv')
     with open(output_path, 'w') as fh:
-        fh.write('Label,X,Y,Z,U1,U2,U3,S11,S22,S33,S12,S13,S23,SMises\n')
+        fh.write('Label,X,Y,Z,U1,U2,U3,S_11,S_22,S_33,S_12,S_13,S_23,S_Mises\n')
         for label, coords, disp, stress, mises in rows:
             # Make everything safe-length
             x, y, z = (list(coords) + [0.0, 0.0, 0.0])[:3]
@@ -556,7 +552,7 @@ def import_shell_mesh(inp_path, model_name, mask2d, spacing, origin, base_th, sp
             spin_th = 0.0
 
     base_section_th = base_th
-    spin_section_th = base_th*2
+    spin_section_th = base_th + spin_th
 
     # Rebuild sections with guaranteed elastic material
     if 'BaseShellSection' in model.sections:
