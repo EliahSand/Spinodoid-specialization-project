@@ -29,6 +29,7 @@ Inspect the generated `results/.../run_*` for STL/log/mask.
 ## Hand-off to Python/Abaqus
 - Convert masks to meshes:
   - Solids: `python exp/mat_to_inp.py ...` or `python exp/batch_mat_to_inp.py --roots Matlab/results`
+  - Stents (cylindrical geometry preserved): `python exp/mat_to_cyl_inp.py --mat Matlab/results/.../stent.mat` or `python exp/batch_mat_to_cyl_inp.py --roots Matlab/results/stents`
   - Shells: `python exp/mat_to_shell_inp.py ...` or `python exp/batch_mat_to_shell_inp.py --roots Matlab/results`  
     (reads `t_base_mm` / `t_spin_mm` from `run_log.txt` when present)
 - Run FEAs:

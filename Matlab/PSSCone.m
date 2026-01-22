@@ -21,11 +21,11 @@ cfg.sigma_vox    = 0.0;
 
 cfg.t_spin       = 1e-3;        %spinodal thickness
 cfg.t_base       = 2e-3;        %base thickness
-cfg.tilesXY      = [1 1];       %tiling for periodicity
+cfg.tilesXY      = [1 20];       %tiling for periodicity
 cfg.add_outer_skin_vox = 0;
 cfg.slice_count  = 8;
 cfg.align_with_cube = true;
-cfg.lamellarAngleDeg = 0;       %lamellar angle to x-axis
+cfg.lamellarAngleDeg = 45;       %lamellar angle to x-axis
 cfg.resultsRoot  = [];
 
 fields = fieldnames(cfg);
@@ -51,7 +51,11 @@ end
 if ~exist(resultsRoot,'dir'), mkdir(resultsRoot); end
 
 rng(cfg.rngSeed);
-[phi, meta] = spinodal_periodic_field(cfg.N, cfg.L, cfg.lambda_vox, cfg.bandwidth, cfg.nModes, cfg.coneDeg);
+theta = deg2rad(cfg.lamellarAngleDeg);
+coneBasis = [cos(theta) -sin(theta) 0; ...
+             sin(theta)  cos(theta) 0; ...
+             0           0          1];
+[phi, meta] = spinodal_periodic_field(cfg.N, cfg.L, cfg.lambda_vox, cfg.bandwidth, cfg.nModes, cfg.coneDeg, coneBasis);
 
 if cfg.sigma_vox > 0
     phi = periodic_gaussian_blur(phi, cfg.sigma_vox);
@@ -72,7 +76,9 @@ if isempty(sliceMask)
     sliceMask = fullMask(:,:,end);
 end
 mask2 = mean(sliceMask, 3) >= 0.5;
-mask2 = rotate_periodic_mask(mask2, cfg.lamellarAngleDeg);
+% Force tileable boundaries in the base 2D mask so x/y edges coincide
+mask2(end,:) = mask2(1,:);
+mask2(:,end) = mask2(:,1);
 solidFractionPattern = mean(mask2(:));
 
 spinLayer = repmat(mask2, 1, 1, tsV);
@@ -104,6 +110,17 @@ solidFractionBase      = mean(baseLayer(:));
 solidFractionSpinLayer = mean(spinLayer(:));
 solidFractionSheet     = mean(sheetMask(:));
 Lz = cfg.t_base + cfg.t_spin;
+
+% Sanity check: edges must match for seamless tiling
+edgeMismatchX = nnz(sheetMask(1,:,:) ~= sheetMask(end,:,:));
+edgeMismatchY = nnz(sheetMask(:,1,:) ~= sheetMask(:,end,:));
+if edgeMismatchX || edgeMismatchY
+    error('PSSCone:periodicity', ...
+        'Periodic tiling check failed (x mismatches: %d, y mismatches: %d).', ...
+        edgeMismatchX, edgeMismatchY);
+else
+    fprintf('Periodicity check passed (x/y edges match).\n');
+end
 
 spinodalType = 'anisotropic';
 if all(cfg.coneDeg >= 89)
@@ -278,23 +295,4 @@ if elapsedSeconds < 60
 else
     fprintf('Run completed in %.2f minutes.\n', elapsedSeconds/60);
 end
-end
-
-function rotMask = rotate_periodic_mask(mask, angleDeg)
-if abs(angleDeg) < 1e-6
-    rotMask = mask;
-    return;
-end
-N = size(mask,1);
-[X,Y] = ndgrid(0:N-1, 0:N-1);
-center = (N-1)/2;
-Xc = X - center;
-Yc = Y - center;
-theta = deg2rad(angleDeg);
-Xr = Xc*cos(theta) - Yc*sin(theta);
-Yr = Xc*sin(theta) + Yc*cos(theta);
-Xr = mod(Xr + center, N);
-Yr = mod(Yr + center, N);
-F = griddedInterpolant({0:N-1,0:N-1}, double(mask), 'nearest', 'nearest');
-rotMask = F(Xr, Yr) >= 0.5;
 end

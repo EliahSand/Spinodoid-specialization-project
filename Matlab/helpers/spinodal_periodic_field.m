@@ -1,4 +1,4 @@
-function [phi, meta] = spinodal_periodic_field(N, L, lambda_vox, bandwidth, nModes, coneDeg)
+function [phi, meta] = spinodal_periodic_field(N, L, lambda_vox, bandwidth, nModes, coneDeg, coneBasis)
 % SPINODAL_PERIODIC_FIELD  Build a 3-D periodic Gaussian random field by a
 % discrete cosine-mode synthesis on the Fourier lattice ("torus").
 %
@@ -9,6 +9,8 @@ function [phi, meta] = spinodal_periodic_field(N, L, lambda_vox, bandwidth, nMod
 %   bandwidth    - relative thickness of the spectral shell retained
 %   nModes       - number of Fourier modes to sample from the shell
 %   coneDeg(1:3) - cone half-angles (deg) about x,y,z; <90 restricts directions
+%   coneBasis    - optional 3x3 rotation matrix whose columns are the
+%                  target axes for the coneDeg angles (defaults to identity)
 %
 % OUTPUTS
 %   phi          - periodic field (double, N x N x N), zero-mean/unit-std
@@ -18,6 +20,20 @@ function [phi, meta] = spinodal_periodic_field(N, L, lambda_vox, bandwidth, nMod
 %   Using integer lattice indices (k_x, k_y, k_z) ensures that
 %   cos(2*pi*(k_x*x/L + k_y*y/L + k_z*z/L) + phase) is exactly periodic
 %   across opposite faces. Summing such modes preserves periodicity.
+
+if nargin < 7 || isempty(coneBasis)
+    coneBasis = eye(3);
+end
+if ~isequal(size(coneBasis), [3 3])
+    error('coneBasis must be a 3x3 matrix whose columns define cone axes.');
+end
+% Normalize columns in case a non-orthonormal matrix is provided.
+for c = 1:3
+    nc = norm(coneBasis(:,c));
+    if nc > 0
+        coneBasis(:,c) = coneBasis(:,c) / nc;
+    end
+end
 
 % --- Grid in real space (0..L) ------------------------------------------
 % Equally spaced sample coordinates; ndgrid returns 3-D coordinate arrays.
@@ -53,8 +69,10 @@ if any(coneDeg < 90)
     coneKeep = false(size(KR));
     for a = 1:3
         if coneDeg(a) >= 90, continue; end
+        axisVec = coneBasis(:,a);
         % Keep vectors whose cosine with axis a exceeds cos(coneDeg(a)).
-        coneKeep = coneKeep | (U(:,:,:,a) >= cosd(coneDeg(a)));
+        axisProj = axisVec(1)*U(:,:,:,1) + axisVec(2)*U(:,:,:,2) + axisVec(3)*U(:,:,:,3);
+        coneKeep = coneKeep | (axisProj >= cosd(coneDeg(a)));
     end
     keep_shell = keep_shell & coneKeep;       % apply cone filter
 end
@@ -88,5 +106,6 @@ phi = phi ./ (std(phi(:)) + eps);
 
 % Book-keeping metadata: helpful for logging/replication
 meta = struct('N',N,'L',L,'lambda_vox',lambda_vox,'k_target_idx',k_target_idx, ...
-              'bandwidth',bandwidth,'nModes',numel(kxs),'coneDeg',coneDeg);
+              'bandwidth',bandwidth,'nModes',numel(kxs),'coneDeg',coneDeg, ...
+              'coneBasis',coneBasis);
 end
