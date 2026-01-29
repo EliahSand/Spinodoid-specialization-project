@@ -1,0 +1,9 @@
+Previous pipeline: generate a periodic 3D field, threshold, take a top slab, average to 2D, then rotate that 2D mask with griddedInterpolant. That rotation resampled onto non‑integer coordinates, so edge voxels no longer matched after wrapping (sub-voxel interpolation breaks the exact lattice). When you tiled, the last row/col differed from the first → visible seams.
+
+Current pipeline: keep the 3D field fully periodic and orient the lamellae in k‑space. We rotate the spectral cones with a 3×3 basis and sample only integer lattice k‑vectors that already enforce periodicity on the cube. The synthesized field is periodic by construction; thresholding and slicing preserve that periodicity because no further geometric warp is applied.
+
+Why the 3×3 basis: the cone filter needs orthonormal axes to test “angle to axis” via dot products. Columns of the 3×3 matrix are those axes. Rotating them rotates the allowed k‑directions without altering lattice integrality; any other shape (non‑square or non‑orthonormal) would distort angles or lose dimensions, corrupting the cone test and periodicity.
+
+Extra guard: we now copy the first row/column onto the last before extrusion and assert x/y edges match; this guarantees voxel-level equality on tile boundaries.
+
+Net effect: all operations that could desynchronize edges (real-space rotation/interp, mismatched boundary voxels) were removed or corrected, while the desired lamellar angle is achieved upstream in the spectrum. Therefore repmat tiling is seamless for 0–90° lamellar angles.

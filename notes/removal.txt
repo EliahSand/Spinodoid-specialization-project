@@ -1,0 +1,11 @@
+Spin layer stochastic removal (PSSCone)
+---------------------------------------
+- Knob: set `remove_top_spin_frac` (0–1). Default 0 (no removal).
+- Process:
+  1) Build the periodic 3D GRF and 2D slice as usual; enforce tileable 2D edges.
+  2) Extrude to `spinLayer`.
+  3) If removal >0, generate a separate periodic GRF over the spin-layer volume (dims [N,N,tsV], sizes [L,L,t_spin]) with RNG seed offset +17.
+  4) Threshold that GRF over existing spin voxels to hit the target percentile; mark those voxels for removal.
+  5) Force periodicity post-etch: copy first row/col to last in the removal mask, then in the modified spinLayer.
+  6) Record actual removed fraction for the log.
+- Finally, concatenate base+spin, tile, and run the edge-equality check; it now passes because boundaries are re-synced after removal.

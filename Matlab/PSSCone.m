@@ -18,10 +18,11 @@ cfg.solid_frac   = 0.50;        % volume fraction of SOLID after threshold (0..1
 cfg.coneDeg      = [30 0 0];    % cone half-angles about x,y,z (90= isotropic). e.g. [90 90 90]
 cfg.rngSeed      = 1;           % reproducible
 cfg.sigma_vox    = 0.0;
+cfg.remove_top_spin_frac = 0;   % fraction of spinodal voxels to stochastically remove in the spin layer
 
 cfg.t_spin       = 1e-3;        %spinodal thickness
 cfg.t_base       = 2e-3;        %base thickness
-cfg.tilesXY      = [1 20];       %tiling for periodicity
+cfg.tilesXY      = [2 3];      %tiling for periodicity
 cfg.add_outer_skin_vox = 0;
 cfg.slice_count  = 8;
 cfg.align_with_cube = true;
@@ -81,7 +82,32 @@ mask2(end,:) = mask2(1,:);
 mask2(:,end) = mask2(:,1);
 solidFractionPattern = mean(mask2(:));
 
+% Spin layer (tsV thick) atop the base; optionally etch away a fraction with
+% a secondary GRF restricted to the spin region only.
 spinLayer = repmat(mask2, 1, 1, tsV);
+spinVoxelsInit = nnz(spinLayer);
+removedFracActual = 0;
+if spinVoxelsInit > 0 && cfg.remove_top_spin_frac > 0
+    % Independent periodic GRF over the spin layer volume; isotropic cones.
+    Nvec_rem = [cfg.N cfg.N tsV];
+    Lvec_rem = [cfg.L cfg.L cfg.t_spin];
+    rng(cfg.rngSeed + 17); % deterministic but separate stream
+    phi_rem = spinodal_periodic_field_rect(Nvec_rem, Lvec_rem, ...
+        cfg.lambda_vox, cfg.bandwidth, cfg.nModes, [90 90 90]);
+    vals = phi_rem(spinLayer);
+    cutoff = prctile(vals, 100*cfg.remove_top_spin_frac);
+    removalMask = false(size(spinLayer));
+    removalMask(spinLayer) = phi_rem(spinLayer) <= cutoff;
+    % Enforce tileable boundaries on the removal mask to keep periodicity.
+    removalMask(end,:,:) = removalMask(1,:,:);
+    removalMask(:,end,:) = removalMask(:,1,:);
+    spinLayer(removalMask) = false;
+    % After removal, force spinLayer boundaries to match.
+    spinLayer(end,:,:) = spinLayer(1,:,:);
+    spinLayer(:,end,:) = spinLayer(:,1,:);
+    removedFracActual = (spinVoxelsInit - nnz(spinLayer)) / spinVoxelsInit;
+end
+
 baseLayer = true(cfg.N, cfg.N, tbV);
 
 sheetMask = cat(3, baseLayer, spinLayer);
@@ -238,9 +264,11 @@ sheetLines = {
     sprintf('  tsV/tbV/Nz (vox): %d / %d / %d', tsV, tbV, Nz)
     sprintf('  outer_skin_vox: %d', cfg.add_outer_skin_vox)
     sprintf('  dims_mm: [%.3f %.3f %.3f]', Lx*1e3, Ly*1e3, Lz*1e3)
-    sprintf('  pattern_frac: %.3f', solidFractionPattern)
+    sprintf('  pattern_frac_2d: %.3f', solidFractionPattern)
     sprintf('  solid_frac spin/base/sheet: %.3f / %.3f / %.3f', ...
             solidFractionSpinLayer, solidFractionBase, solidFractionSheet)
+    sprintf('  spin_top_removed_target: %.3f', cfg.remove_top_spin_frac)
+    sprintf('  spin_top_removed_actual: %.3f', removedFracActual)
     };
 
 logLines = [
