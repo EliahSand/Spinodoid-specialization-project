@@ -742,6 +742,11 @@ def main():
 
         model, assembly, inst_name = import_shell_mesh(inp_path, model_name, mask2d, spacing, origin, base_th, spin_th)
         create_step_and_bcs(model, assembly, inst_name)
+        # Save CAE snapshot alongside the shell FEA outputs.
+        cae_path = os.path.join(work_dir, job_name + '.cae')
+        if not os.path.isdir(work_dir):
+            os.makedirs(work_dir)
+        mdb.saveAs(pathName=cae_path)
         odb_path = run_job(model_name, job_name, work_dir)
         print('Shell analysis complete. ODB: %s' % odb_path)
         try:

@@ -1,6 +1,9 @@
+% PSSCone - Spinodal two-layered sheet generator with controllable in-plane
+% lamellar angle and tiling
+
 function PSSCone(params)
 tStart = tic;
-% PSSCone - Sheet generator with controllable in-plane lamellar angle.
+
 
 if nargin < 1
     params = struct();
@@ -22,7 +25,7 @@ cfg.remove_top_spin_frac = 0;   % fraction of spinodal voxels to stochastically 
 
 cfg.t_spin       = 1e-3;        %spinodal thickness
 cfg.t_base       = 2e-3;        %base thickness
-cfg.tilesXY      = [2 3];      %tiling for periodicity
+cfg.tilesXY      = [1 20];      %tiling for periodicity
 cfg.add_outer_skin_vox = 0;
 cfg.slice_count  = 8;
 cfg.align_with_cube = true;

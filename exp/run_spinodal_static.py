@@ -520,6 +520,12 @@ def main():
         try:
             model, assembly, inst_name = import_mesh(inp_path, model_name)
             create_step_and_bcs(model, assembly, inst_name)
+            # Save the built CAE model in the FEA folder for this run.
+            cae_path = os.path.join(fea_dir, job_name + '.cae')
+            # Ensure target folder exists before save.
+            if not os.path.isdir(os.path.dirname(cae_path)):
+                os.makedirs(os.path.dirname(cae_path))
+            mdb.saveAs(pathName=cae_path)
             odb_path = run_job(model_name, job_name, fea_dir)
         except Exception as exc:
             print('CAE import failed (%s); falling back to solver-only path.' % exc)

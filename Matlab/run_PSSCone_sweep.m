@@ -1,6 +1,7 @@
-function run_PSSCone_sweep()
 % RUN_PSSCONe_SWEEP  Batch runner for PSSCone with multiple lamellar angles
-% and thickness ratios. Creates results under results/sheets/lamellar/trXX.
+% and thickness ratios. Creates results under "results/sheets/lamellar/trXX".
+
+function run_PSSCone_sweep()
 
 tic
 
