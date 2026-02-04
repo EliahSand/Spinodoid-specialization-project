@@ -17,7 +17,7 @@ coordsY = solid.Z; % use X-Z plane consistently for all maps
 modelTag = sprintf('%s | \\theta = %d°', trLabel, thetaDeg);
 
 displacementFields = {'U1', 'U2', 'U3'};
-stressFields = {'S11', 'S22', 'SMises'};
+stressFields = {'S_11', 'S_22', 'S_Mises'};
 
 makeMapFigure(displacementFields, 'Displacement fields', 'map_displacements.png');
 makeMapFigure(stressFields, 'Stress fields', 'map_stresses.png');

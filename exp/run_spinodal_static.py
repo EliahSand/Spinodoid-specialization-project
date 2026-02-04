@@ -298,7 +298,7 @@ def create_step_and_bcs(model, assembly, inst_name):
                      region=assembly.sets['BC_LEFT'])
     model.DisplacementBC(name='BC_Right', createStepName='LoadStep',
                          region=assembly.sets['BC_RIGHT'],
-                         u1=0.1, u2=UNSET, u3=UNSET)
+                         u1=0.1, u2=0, u3=0)
 
 
 def run_job(model_name, job_name, work_dir):

@@ -10,7 +10,7 @@ addpath(scriptDir);
 
 trLabels = {'tr50', 'tr100', 'tr200'};
 thetasDeg = [0, 30, 45, 60, 90];
-overlayFields = {'U1','U2','U3','S11','S22','SMises'};
+overlayFields = {'U1','U2','U3','S_11','S_22','S_Mises'};
 
 doPCA = license('test', 'statistics_toolbox') && exist('pca', 'file') == 2;
 
@@ -63,7 +63,7 @@ for iTr = 1:numel(trLabels)
             end
 
             dispFields = {'U1', 'U2', 'U3'};
-            stressFields = {'S11', 'S22', 'SMises'};
+            stressFields = {'S_11', 'S_22', 'S_Mises'};
             dispAccept = all(cellfun(@(f) metrics.(f).MaxRel < dispThresh.MaxRel ...
                 && metrics.(f).R > dispThresh.R, dispFields));
             stressAccept = all(cellfun(@(f) metrics.(f).MaxRel < stressThresh.MaxRel ...
@@ -92,7 +92,7 @@ for iTr = 1:numel(trLabels)
             end
 
             fprintf('Component-level metrics:\n');
-            print_component_summary(metrics, {'U1','U2','U3','S11','S22','SMises'});
+            print_component_summary(metrics, {'U1','U2','U3','S_11','S_22','S_Mises'});
             fprintf('  Displacements: %s (MaxRel < %.2f, R > %.2f)\n', ...
                 ternary(dispAccept, 'ACCEPTABLE', 'NOT acceptable'), dispThresh.MaxRel, dispThresh.R);
             fprintf('  Stresses:      %s (MaxRel < %.2f, R > %.2f)\n', ...

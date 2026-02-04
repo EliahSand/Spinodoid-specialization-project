@@ -17,7 +17,7 @@ end
 
 ensure_dir(outDir);
 
-fields = {'U1','U2','U3','S11','S22','SMises'};
+fields = {'U1','U2','U3','S_11','S_22','S_Mises'};
 errMat = zeros(height(solid), numel(fields));
 for i = 1:numel(fields)
     fname = fields{i};

@@ -13,7 +13,7 @@ end
 
 ensure_dir(outDir);
 
-fieldsList = {'U1','U2','U3','S11','S22','SMises'};
+fieldsList = {'U1','U2','U3','S_11','S_22','S_Mises'};
 [coords, coordLabel, sortIdx] = pick_axis_and_sort(solid);
 solid = solid(sortIdx, :);
 shell = shell(sortIdx, :);

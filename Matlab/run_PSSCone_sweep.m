@@ -11,9 +11,9 @@ if ~exist(resultsBase, 'dir')
     mkdir(resultsBase);
 end
 
-angles = [0 30 45 60 90];         % lamellar angles in degrees
-ratios = [0.5 1.0 2];   % t_spin / t_base ratios
-baseThickness = 2e-3;      % meters
+angles = [0 30 45 60 90];           % lamellar angles in degrees
+ratios = [0.5 1.0 2];               % t_spin / t_base ratios
+baseThickness = 2e-3;               % meters
 
 for r = ratios
     ratioLabel = sprintf('tr%02d', round(100 * r));

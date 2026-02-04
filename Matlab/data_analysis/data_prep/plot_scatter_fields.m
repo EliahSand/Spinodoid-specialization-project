@@ -13,8 +13,8 @@ end
 ensure_dir(outDir);
 
 displacementFields = {'U1', 'U2', 'U3'};
-normalStressFields = {'S11', 'S22', 'S33', 'SMises'};
-shearStressFields = {'S12', 'S13', 'S23'};
+normalStressFields = {'S_11', 'S_22', 'S_33', 'S_Mises'};
+shearStressFields = {'S_12', 'S_13', 'S_23'};
 
 ratioLabel = format_ratio_label(trLabel);
 modelTag = sprintf('%s | \\theta = %d°', ratioLabel, thetaDeg);

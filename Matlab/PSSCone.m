@@ -13,7 +13,7 @@ end
 
 cfg = struct();
 cfg.N            = 64;          % grid size (NxNxN). Use powers of two for speed
-cfg.L            = 40e-3;       % physical box length (mm)
+cfg.L            = 40e-3;          % physical box length (mm)    (vanligvis 40e-3)
 cfg.lambda_vox   = 25;          % target feature wavelength in voxels (~rib/ligament spacing)
 cfg.bandwidth    = 2;           % relative shell thickness around target |k| (0.1–0.3)
 cfg.nModes       = 4000;        % number of Fourier modes to sample (1k–10k typical)
@@ -23,8 +23,8 @@ cfg.rngSeed      = 1;           % reproducible
 cfg.sigma_vox    = 0.0;
 cfg.remove_top_spin_frac = 0;   % fraction of spinodal voxels to stochastically remove in the spin layer
 
-cfg.t_spin       = 1e-3;        %spinodal thickness
-cfg.t_base       = 2e-3;        %base thickness
+cfg.t_spin       = 1e-3;        %spinodal thickness         (vanligvis 1e-3)
+cfg.t_base       = 2e-3;        %base thickness             (vanligvis 2e-3)
 cfg.tilesXY      = [1 20];      %tiling for periodicity
 cfg.add_outer_skin_vox = 0;
 cfg.slice_count  = 8;

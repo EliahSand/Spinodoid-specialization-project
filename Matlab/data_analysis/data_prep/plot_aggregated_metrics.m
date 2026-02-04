@@ -10,7 +10,7 @@ end
 
 ensure_dir(outDir);
 
-fieldsKey = {'U1','U2','U3','S11','S22','SMises'};
+fieldsKey = {'U1','U2','U3','S_11','S_22','S_Mises'};
 metricNames = {'MAE', 'RMSE', 'MeanRel'};
 
 nTr = numel(trLabels);
@@ -44,7 +44,7 @@ for f = 1:numel(fieldsKey)
     makeLines(field, false, sprintf('agg_%s_vs_angle.png', lower(field)));
 end
 
-heatmapFields = {'U3', 'SMises'};
+heatmapFields = {'U3', 'S_Mises'};
 heatmapMetrics = {'MAE', 'MeanRel'};
 for hf = 1:numel(heatmapFields)
     field = heatmapFields{hf};

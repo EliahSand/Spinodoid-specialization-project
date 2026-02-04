@@ -6,7 +6,7 @@ arguments
     shell table
 end
 
-fields = {'U1','U2','U3','S11','S22','S33','S12','S13','S23','SMises'};
+fields = {'U1','U2','U3','S_11','S_22','S_33','S_12','S_13','S_23','S_Mises'};
 
 % Ensure base coordinate columns are numeric.
 baseCols = {'Label','X','Y','Z'};

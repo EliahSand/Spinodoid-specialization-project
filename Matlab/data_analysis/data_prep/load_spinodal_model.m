@@ -36,12 +36,23 @@ end
 filePath = fullfile(dataDir, csvFiles(1).name);
 
 % Force numeric import for all expected columns to avoid cell arrays.
-expectedVars = {'Label','X','Y','Z','U1','U2','U3','S11','S22','S33','S12','S13','S23','SMises'};
+expectedVars = {'Label','X','Y','Z','U1','U2','U3','S_11','S_22','S_33','S_12','S_13','S_23','S_Mises'};
 
 opts = detectImportOptions(filePath, 'Delimiter', ',');
-opts.SelectedVariableNames = expectedVars;
-opts = setvartype(opts, expectedVars, 'double');
 tbl = readtable(filePath, opts);
+
+% Normalize common stress column variants (e.g., S11 -> S_11).
+renameMap = containers.Map( ...
+    {'S11','S22','S33','S12','S13','S23','SMises'}, ...
+    {'S_11','S_22','S_33','S_12','S_13','S_23','S_Mises'});
+vars = tbl.Properties.VariableNames;
+for iVar = 1:numel(vars)
+    name = vars{iVar};
+    if isKey(renameMap, name)
+        vars{iVar} = renameMap(name);
+    end
+end
+tbl.Properties.VariableNames = vars;
 
 missingVars = setdiff(expectedVars, tbl.Properties.VariableNames);
 if ~isempty(missingVars)
