@@ -654,18 +654,44 @@ def create_step_and_bcs(model, assembly, inst_name):
     xs = [n.coordinates[0] for n in inst.nodes]
     min_x = min(xs)
     max_x = max(xs)
-    span = max(max_x - min_x, 1.0)
-    tol = 1e-6 * span
+    L = max(max_x - min_x, 1.0)
 
-    left_nodes = inst.nodes.getByBoundingBox(xMin=min_x - tol, xMax=min_x + tol,
-                                             yMin=-1e9, yMax=1e9, zMin=-1e9, zMax=1e9)
-    right_nodes = inst.nodes.getByBoundingBox(xMin=max_x - tol, xMax=max_x + tol,
-                                              yMin=-1e9, yMax=1e9, zMin=-1e9, zMax=1e9)
+    # --- End "partition" bands (as node/element sets) ---
+    end_frac = 0.01  # 1% of total length on each side
+    end_len = end_frac * L
+    tol = 1e-6 * L
+
+    # Nodes in the left 1% band: [min_x, min_x + end_len]
+    left_nodes = inst.nodes.getByBoundingBox(
+        xMin=min_x - tol, xMax=min_x + end_len + tol,
+        yMin=-1e9, yMax=1e9, zMin=-1e9, zMax=1e9,
+    )
+
+    # Nodes in the right 1% band: [max_x - end_len, max_x]
+    right_nodes = inst.nodes.getByBoundingBox(
+        xMin=max_x - end_len - tol, xMax=max_x + tol,
+        yMin=-1e9, yMax=1e9, zMin=-1e9, zMax=1e9,
+    )
+
+    # Optional: element sets covering the same end bands (useful for loads/outputs)
+    left_elems = inst.elements.getByBoundingBox(
+        xMin=min_x - tol, xMax=min_x + end_len + tol,
+        yMin=-1e9, yMax=1e9, zMin=-1e9, zMax=1e9,
+    )
+    right_elems = inst.elements.getByBoundingBox(
+        xMin=max_x - end_len - tol, xMax=max_x + tol,
+        yMin=-1e9, yMax=1e9, zMin=-1e9, zMax=1e9,
+    )
     if not left_nodes or not right_nodes:
         raise ValueError('Failed to find nodes on min/max X faces for BC sets.')
 
     assembly.Set(name='BC_LEFT', nodes=left_nodes)
     assembly.Set(name='BC_RIGHT', nodes=right_nodes)
+
+    if left_elems:
+        assembly.Set(name='BC_LEFT_ELEMS', elements=left_elems)
+    if right_elems:
+        assembly.Set(name='BC_RIGHT_ELEMS', elements=right_elems)
 
     if 'BC_Left' in model.boundaryConditions:
         del model.boundaryConditions['BC_Left']
