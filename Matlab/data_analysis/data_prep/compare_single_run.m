@@ -51,8 +51,9 @@ end
 if opts.DoPlots
     [trLabel, thetaDeg] = parse_run_tags(runName);
     plot_scatter_fields(solid, shell, metrics, trLabel, thetaDeg, outputDir);
-    plot_error_histograms(errorTable, metrics, trLabel, thetaDeg, outputDir);
-    plot_curvature_profiles(solid, shell, metrics, trLabel, thetaDeg, outputDir);
+    plot_curvature(solid, shell, trLabel, thetaDeg, outputDir);
+    %plot_error_histograms(errorTable, metrics, trLabel, thetaDeg, outputDir);
+    %plot_curvature_profiles(solid, shell, metrics, trLabel, thetaDeg, outputDir);
     if opts.DoPCA
         if license('test', 'statistics_toolbox') && exist('pca', 'file') == 2
             analyze_error_patterns(solid, shell, trLabel, thetaDeg, outputDir);

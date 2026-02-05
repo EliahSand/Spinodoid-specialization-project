@@ -654,34 +654,59 @@ def create_step_and_bcs(model, assembly, inst_name):
     xs = [n.coordinates[0] for n in inst.nodes]
     min_x = min(xs)
     max_x = max(xs)
-    L = max(max_x - min_x, 1.0)
+    L_raw = max_x - min_x
+    L = L_raw if abs(L_raw) > 0.0 else 1.0
 
-    # --- End "partition" bands (as node/element sets) ---
-    end_frac = 0.01  # 1% of total length on each side
-    end_len = end_frac * L
-    tol = 1e-6 * L
+    # --- End "partition" bands defined by X-planes (robust for discrete meshes) ---
+    # Band size as a fraction of the length (via discrete X-planes).
+    # Override at runtime with environment variable BC_END_FRAC (e.g. 0.002 for 0.2%).
+    end_frac = float(os.environ.get('BC_END_FRAC', '0.005'))  # default: 1%
 
-    # Nodes in the left 1% band: [min_x, min_x + end_len]
+    # Use unique X coordinates (planes/columns). This avoids oversized sets when spacing is coarse.
+    unique_x = sorted(set(xs))
+    nplanes = len(unique_x)
+    if nplanes < 2:
+        raise ValueError('Not enough unique X coordinates to define end bands (nplanes=%d).' % nplanes)
+
+    # Number of X-planes to include on each end (at least 1)
+    n_end = int(np.ceil(end_frac * nplanes))
+    if n_end < 1:
+        n_end = 1
+    if n_end > nplanes:
+        n_end = nplanes
+
+    # Determine cut positions from the discrete planes
+    x_left_max = unique_x[n_end - 1]
+    x_right_min = unique_x[-n_end]
+
+    # Small tolerance based on mesh extent
+    tol = 1e-8 * max(1.0, abs(L))
+
+    # Nodes in the left band: all nodes with x <= x_left_max
     left_nodes = inst.nodes.getByBoundingBox(
-        xMin=min_x - tol, xMax=min_x + end_len + tol,
+        xMin=min_x - tol, xMax=x_left_max + tol,
         yMin=-1e9, yMax=1e9, zMin=-1e9, zMax=1e9,
     )
 
-    # Nodes in the right 1% band: [max_x - end_len, max_x]
+    # Nodes in the right band: all nodes with x >= x_right_min
     right_nodes = inst.nodes.getByBoundingBox(
-        xMin=max_x - end_len - tol, xMax=max_x + tol,
+        xMin=x_right_min - tol, xMax=max_x + tol,
         yMin=-1e9, yMax=1e9, zMin=-1e9, zMax=1e9,
     )
 
-    # Optional: element sets covering the same end bands (useful for loads/outputs)
+    # Optional: element sets covering the same end bands
     left_elems = inst.elements.getByBoundingBox(
-        xMin=min_x - tol, xMax=min_x + end_len + tol,
+        xMin=min_x - tol, xMax=x_left_max + tol,
         yMin=-1e9, yMax=1e9, zMin=-1e9, zMax=1e9,
     )
     right_elems = inst.elements.getByBoundingBox(
-        xMin=max_x - end_len - tol, xMax=max_x + tol,
+        xMin=x_right_min - tol, xMax=max_x + tol,
         yMin=-1e9, yMax=1e9, zMin=-1e9, zMax=1e9,
     )
+
+    print('BC band selection: end_frac=%.6g, nplanes=%d, n_end=%d, x_left_max=%.6e, x_right_min=%.6e, L=%.6e'
+          % (end_frac, nplanes, n_end, x_left_max, x_right_min, L))
+
     if not left_nodes or not right_nodes:
         raise ValueError('Failed to find nodes on min/max X faces for BC sets.')
 

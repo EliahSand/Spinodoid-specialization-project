@@ -29,7 +29,7 @@ cfg.tilesXY      = [1 20];      %tiling for periodicity
 cfg.add_outer_skin_vox = 0;
 cfg.slice_count  = 8;
 cfg.align_with_cube = true;
-cfg.lamellarAngleDeg = 45;       %lamellar angle to x-axis
+cfg.lamellarAngleDeg = 0;       %lamellar angle to x-axis
 cfg.resultsRoot  = [];
 
 fields = fieldnames(cfg);

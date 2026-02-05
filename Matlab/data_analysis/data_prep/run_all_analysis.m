@@ -55,9 +55,11 @@ for iTr = 1:numel(trLabels)
 
             plot_scatter_fields(solid, shell, metrics, trLabel, theta, outputDir);
             plot_error_histograms(errorTable, metrics, trLabel, theta, outputDir);
+            
             % Spatial maps proved uninformative for these midsections; rely on
             % curvature profiles and overlays instead.
             plot_curvature_profiles(solid, shell, metrics, trLabel, theta, outputDir);
+            plot_curvature(solid, shell, trLabel, theta, outputDir);
             if doPCA
                 analyze_error_patterns(solid, shell, trLabel, theta, outputDir);
             end
