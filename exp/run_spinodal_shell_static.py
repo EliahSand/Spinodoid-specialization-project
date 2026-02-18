@@ -5,7 +5,7 @@ Sections:
   BaseShellSection     -> BASE_SHELL (base layer thickness)
   SpinodalShellSection -> SPINODAL_SHELL (base + spinodal thickness)
 BCs:
-  Left face encastre (min X); right face displacement u1=0.1 (max X).
+  Left face encastre (min X); right face displacement u1=0.1*(maxX-minX).
 
 Usage:
     abaqus cae noGUI=exp/run_spinodal_shell_static.py -- path/to/shell_mesh.inp 
@@ -18,6 +18,7 @@ import odbAccess  # noqa: F401
 import os
 import sys
 import json
+import time
 
 import numpy as np
 
@@ -300,6 +301,17 @@ def classify_elements_by_mask(part, mask2d, spacing, origin):
     return base_eids, spin_eids
 
 
+def _is_laminate_case(manifest, inp_path):
+    text = ' '.join([
+        str(manifest.get('notes', '')),
+        str(manifest.get('mask', '')),
+        str(manifest.get('mat', '')),
+        str(manifest.get('var', '')),
+        str(inp_path),
+    ]).lower()
+    return 'laminate' in text
+
+
 def collect_exclusion_nodes(odb_root, instance_name):
     exclude = set()
     spin_names = [n for n in odb_root.nodeSets.keys() if 'SPIN' in n.upper()]
@@ -526,7 +538,7 @@ def extract_midplane_results(odb_path, fea_dir):
     return output_path, len(rows)
 
 
-def import_shell_mesh(inp_path, model_name, mask2d, spacing, origin, base_th, spin_th):
+def import_shell_mesh(inp_path, model_name, mask2d, spacing, origin, base_th, spin_th, preserve_input_sections=False):
     if model_name in mdb.models:
         del mdb.models[model_name]
     model = mdb.ModelFromInputFile(name=model_name, inputFileName=inp_path)
@@ -553,6 +565,14 @@ def import_shell_mesh(inp_path, model_name, mask2d, spacing, origin, base_th, sp
 
     base_section_th = base_th
     spin_section_th = base_th + spin_th
+
+    # For laminate models, preserve section definitions/assignments from INP.
+    if preserve_input_sections and len(part.sectionAssignments) > 0:
+        print('Preserving shell sections from input INP (section assignments: %d).' % len(part.sectionAssignments))
+        assembly = model.rootAssembly
+        assembly.DatumCsysByDefault(CARTESIAN)
+        inst_name = assembly.instances.keys()[0]
+        return model, assembly, inst_name
 
     # Rebuild sections with guaranteed elastic material
     if 'BaseShellSection' in model.sections:
@@ -655,7 +675,10 @@ def create_step_and_bcs(model, assembly, inst_name):
     min_x = min(xs)
     max_x = max(xs)
     L_raw = max_x - min_x
-    L = L_raw if abs(L_raw) > 0.0 else 1.0
+    if L_raw <= 0.0:
+        raise ValueError('Invalid sheet length along X (max_x - min_x = %.6e).' % L_raw)
+    L = L_raw
+    u1_disp = 0.1 * L_raw
 
     # --- End "partition" bands defined by X-planes (robust for discrete meshes) ---
     # Band size as a fraction of the length (via discrete X-planes).
@@ -727,7 +750,7 @@ def create_step_and_bcs(model, assembly, inst_name):
                      region=assembly.sets['BC_LEFT'])
     model.DisplacementBC(name='BC_Right', createStepName='LoadStep',
                          region=assembly.sets['BC_RIGHT'],
-                         u1=0.1, u2=0.0, u3=0.0,
+                         u1=u1_disp, u2=0.0, u3=0.0,
                          ur1=0.0,ur2 = 0.0, ur3=0.0
                          )
 
@@ -793,7 +816,10 @@ def main():
         model_name = 'SpinodalShellModel'
         job_name = os.path.splitext(os.path.basename(inp_path))[0] + '_shell_job'
 
-        model, assembly, inst_name = import_shell_mesh(inp_path, model_name, mask2d, spacing, origin, base_th, spin_th)
+        preserve_input_sections = _is_laminate_case(manifest, inp_path)
+        model, assembly, inst_name = import_shell_mesh(
+            inp_path, model_name, mask2d, spacing, origin, base_th, spin_th,
+            preserve_input_sections=preserve_input_sections)
         create_step_and_bcs(model, assembly, inst_name)
         # Save CAE snapshot alongside the shell FEA outputs.
         cae_path = os.path.join(work_dir, job_name + '.cae')

@@ -1,0 +1,28 @@
+Laminate "a" vs actual Abaqus length (voxel snapping)
+=====================================================
+
+How it is computed in Matlab/LaminateGeneration/make_laminate_sheet.m:
+
+1) Voxel size in XY:
+   Svox = L / N
+
+2) Requested feature in voxel units:
+   aV = round(a / Svox)
+
+3) Resolved (actual) feature size used in mesh/exports:
+   aResolved = aV * Svox
+
+Default example:
+   L = 40e-3 m
+   N = 128
+   Svox = 40e-3 / 128 = 3.125e-4 m
+   a = 1e-3 m
+   a / Svox = 3.2
+   aV = round(3.2) = 3 vox
+   aResolved = 3 * 3.125e-4 = 9.375e-4 m
+
+So Abaqus reports 9.375e-4 m because that is the nearest realizable voxel-aligned value.
+
+Practical note:
+To hit a target size more closely, increase N (smaller voxels) or pick a that is
+an exact multiple of Svox.

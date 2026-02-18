@@ -3,8 +3,9 @@
 
 usage:
 
-python exp/mat_to_shell_inp.py --mat Matlab/results/.../sheet.mat --var sheetMask --spacing <voxel_size_m>
-"""
+python exp/mat_to_shell_inp.py --mat Matlab/results/.../sheet.mat --var sheetMask
+
+Spacing is auto-read from MAT metadata (voxelSpacing / voxelSizeXY + zVoxelThickness); --spacing is optional."""
 
 import argparse
 import os
@@ -131,6 +132,16 @@ def write_shell_inp(path: str,
     mat_for_thickness = mat_data if mat_data is not None else {}
     auto_base, auto_spin, boundary = compute_thicknesses(
         mat_for_thickness, mask=mask, spacing=spacing, layer_split=layer_split)
+
+    # Keep detected boundary untouched to preserve geometry/classification.
+    zdim = mask.shape[0]
+    boundary = max(0, min(int(boundary), zdim))
+    base_layers = boundary
+    spin_layers = zdim - boundary
+    if base_layers < 4 or spin_layers < 4:
+        print('Warning: BASE/SPIN slice counts are %d/%d (<4 on one side). '
+              'Geometry is preserved; increase upstream z-resolution if needed.' % (base_layers, spin_layers))
+
     base_th = base_thickness if base_thickness is not None else auto_base
     spin_th = spin_thickness if spin_thickness is not None else auto_spin
 
@@ -213,13 +224,7 @@ def convert_mat_to_shell(mat_path: str,
                          base_thickness: Optional[float] = None,
                          spin_thickness: Optional[float] = None):
     mask, resolved_var, mat_data = load_mask_from_mat(mat_path, varname=varname, peel=peel)
-    try:
-        spacing_val = _resolve_spacing(spacing, mat_data)
-    except ValueError:
-        if 'voxelSizeXY' in mat_data:
-            spacing_val = float(np.array(mat_data['voxelSizeXY']).astype(float).ravel()[0])
-        else:
-            raise
+    spacing_val = _resolve_spacing(spacing, mat_data)
     origin_vec = _resolve_origin(origin, mat_data)
     layer_split = _detect_sheet_layers(mat_data)
 

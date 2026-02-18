@@ -140,13 +140,16 @@ def parse_nodes_from_inp(inp_path):
 def build_bc_sets(mesh_info):
     min_x = mesh_info.min_x
     max_x = mesh_info.max_x
-    span = max(max_x - min_x, 1.0)
+    length_x = max_x - min_x
+    span = max(length_x, 1.0)
     tol = 1e-6 * span
     left = [lbl for lbl, x, _, _ in mesh_info.nodes if abs(x - min_x) <= tol]
     right = [lbl for lbl, x, _, _ in mesh_info.nodes if abs(x - max_x) <= tol]
     if not left or not right:
         raise RuntimeError('No nodes detected on min/max X faces (left=%d, right=%d).' % (len(left), len(right)))
-    return left, right, span
+    if length_x <= 0.0:
+        raise RuntimeError('Invalid sheet length along X (max_x - min_x = %.6e).' % length_x)
+    return left, right, length_x
 
 
 def chunk_ids(ids, chunk=16):
@@ -155,7 +158,7 @@ def chunk_ids(ids, chunk=16):
         yield ', '.join(str(x) for x in ids[i:i + chunk])
 
 
-def prepare_job_input(inp_path, job_inp_path, left_nodes, right_nodes):
+def prepare_job_input(inp_path, job_inp_path, left_nodes, right_nodes, u1_disp):
     with open(inp_path, 'r') as fh:
         lines = fh.readlines()
 
@@ -191,7 +194,7 @@ def prepare_job_input(inp_path, job_inp_path, left_nodes, right_nodes):
     lines.append('1., 1., 1., 1.\n')
     lines.append('*Boundary\n')
     lines.append('BC_LEFT, ENCASTRE\n')
-    lines.append('BC_RIGHT, 1, 1, 0.1\n')
+    lines.append('BC_RIGHT, 1, 1, %.12g\n' % float(u1_disp))
     lines.append('BC_RIGHT, 2, 2, 0.0\n')
     lines.append('BC_RIGHT, 3, 3, 0.0\n')
     lines.append('*Output, field\n')
@@ -274,8 +277,12 @@ def create_step_and_bcs(model, assembly, inst_name):
     xs = [n.coordinates[0] for n in inst.nodes]
     min_x = min(xs)
     max_x = max(xs)
-    span = max(max_x - min_x, 1.0)
+    length_x = max_x - min_x
+    if length_x <= 0.0:
+        raise ValueError('Invalid sheet length along X (max_x - min_x = %.6e).' % length_x)
+    span = max(length_x, 1.0)
     tol = 1e-6 * span
+    u1_disp = 0.1 * length_x
 
     left_nodes = inst.nodes.getByBoundingBox(xMin=min_x - tol, xMax=min_x + tol,
                                              yMin=-1e9, yMax=1e9, zMin=-1e9, zMax=1e9)
@@ -298,8 +305,8 @@ def create_step_and_bcs(model, assembly, inst_name):
                      region=assembly.sets['BC_LEFT'])
     model.DisplacementBC(name='BC_Right', createStepName='LoadStep',
                          region=assembly.sets['BC_RIGHT'],
-                         u1=0.1, u2=0.0, u3=0.0,
-                         ur1 = 0.0, ur2 = 0.0, ur3=0.0)
+                         u1=u1_disp, u2=0.0, u3=0.0,
+                         ur1=0.0, ur2=0.0, ur3=0.0)
 
 
 def run_job(model_name, job_name, work_dir):
@@ -534,9 +541,10 @@ def main():
 
         if use_solver_only:
             mesh_info = parse_nodes_from_inp(inp_path)
-            left_nodes, right_nodes, _span = build_bc_sets(mesh_info)
+            left_nodes, right_nodes, length_x = build_bc_sets(mesh_info)
+            u1_disp = 0.1 * length_x
             job_inp_path = os.path.join(fea_dir, job_name + '.inp')
-            prepare_job_input(inp_path, job_inp_path, left_nodes, right_nodes)
+            prepare_job_input(inp_path, job_inp_path, left_nodes, right_nodes, u1_disp)
             odb_path = run_job_from_input(job_name, job_inp_path, fea_dir)
 
         csv_path = extract_midplane_results(odb_path, fea_dir)

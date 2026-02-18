@@ -35,6 +35,7 @@ end
 
 [solid, shell] = load_run_pair(runFolder);
 [metrics, errorTable] = compare_solid_shell(solid, shell);
+[curvatureCheck, curvatureTable] = check_curvature_single_run(runFolder, solid, shell);
 
 if opts.WriteFiles || opts.DoPlots
     ensure_dir(outputDir);
@@ -44,14 +45,19 @@ if opts.WriteFiles
     metricsTbl = metrics_to_table(metrics);
     writetable(metricsTbl, fullfile(outputDir, 'metrics_summary.csv'));
     writetable(errorTable, fullfile(outputDir, 'node_errors.csv'));
+    writetable(curvatureTable, fullfile(outputDir, 'curvature_check.csv'));
     save(fullfile(outputDir, 'metrics.mat'), 'metrics');
     save(fullfile(outputDir, 'error_table.mat'), 'errorTable');
+    save(fullfile(outputDir, 'curvature_check.mat'), 'curvatureCheck');
 end
 
 if opts.DoPlots
-    [trLabel, thetaDeg] = parse_run_tags(runName);
+    [trLabel, thetaDeg] = parse_run_tags(runName, runFolder);
     plot_scatter_fields(solid, shell, metrics, trLabel, thetaDeg, outputDir);
-    plot_curvature(solid, shell, trLabel, thetaDeg, outputDir);
+    plot_curvature(solid, shell, trLabel, thetaDeg, outputDir, ...
+        'CurvatureCheck', curvatureCheck);
+    plot_curvature_offset_removed(solid, shell, trLabel, thetaDeg, outputDir, ...
+        'CurvatureCheck', curvatureCheck);
     %plot_error_histograms(errorTable, metrics, trLabel, thetaDeg, outputDir);
     %plot_curvature_profiles(solid, shell, metrics, trLabel, thetaDeg, outputDir);
     if opts.DoPCA
@@ -64,11 +70,21 @@ if opts.DoPlots
     end
 end
 
+if ~isnan(curvatureCheck.theory.kappa)
+    fprintf(['[%s] Curvature check: theory kappa=%.6g 1/m | solid=%.6g 1/m ' ...
+        '(rel=%.3g) | shell=%.6g 1/m (rel=%.3g)\n'], ...
+        runName, curvatureCheck.theory.kappa, curvatureCheck.solid.kappaCircle, ...
+        curvatureCheck.solid.RelErrTheory, curvatureCheck.shell.kappaCircle, ...
+        curvatureCheck.shell.RelErrTheory);
+else
+    fprintf('[%s] Curvature check: run_log inputs not found (theory skipped).\n', runName);
+end
+
 fprintf('[%s] Comparison complete. Output: %s\n', runName, outputDir);
 
 end
 
-function [trLabel, thetaDeg] = parse_run_tags(runName)
+function [trLabel, thetaDeg] = parse_run_tags(runName, runFolder)
 trLabel = runName;
 thetaDeg = NaN;
 trToken = regexp(runName, 'tr\d+', 'match', 'once');
@@ -78,6 +94,41 @@ end
 angToken = regexp(runName, 'ang\d+', 'match', 'once');
 if ~isempty(angToken)
     thetaDeg = str2double(angToken(4:end));
+    return;
+end
+
+% Laminate naming convention: dirx -> 0 deg, diry -> 90 deg.
+runNameLower = lower(runName);
+if contains(runNameLower, 'dirx')
+    thetaDeg = 0;
+    return;
+elseif contains(runNameLower, 'diry')
+    thetaDeg = 90;
+    return;
+end
+
+% Fallback to run_log line_direction when available.
+logPath = fullfile(runFolder, 'run_log.txt');
+if isfile(logPath)
+    fid = fopen(logPath, 'r');
+    if fid >= 0
+        cleanupObj = onCleanup(@() fclose(fid)); %#ok<NASGU>
+        while true
+            line = fgetl(fid);
+            if ~ischar(line)
+                break;
+            end
+            lineLow = lower(strtrim(line));
+            if startsWith(lineLow, 'line_direction:')
+                if contains(lineLow, 'x')
+                    thetaDeg = 0;
+                elseif contains(lineLow, 'y')
+                    thetaDeg = 90;
+                end
+                break;
+            end
+        end
+    end
 end
 end
 

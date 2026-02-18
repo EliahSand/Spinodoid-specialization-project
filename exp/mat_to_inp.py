@@ -128,6 +128,18 @@ def write_inp(path, mask, spacing, origin, material, density=None, elastic=None,
     ox, oy, oz = origin
     sx, sy, sz = _normalize_spacing(spacing)
 
+    # Keep detected boundary untouched to preserve geometry/classification.
+    if layer_split and layer_split.get('axis', 0) == 0:
+        boundary = int(layer_split.get('boundary', 0))
+        boundary = max(0, min(boundary, zdim))
+        layer_split = dict(layer_split)
+        layer_split['boundary'] = boundary
+        base_layers = boundary
+        spin_layers = zdim - boundary
+        if base_layers < 4 or spin_layers < 4:
+            print('Warning: BASE/SPIN slice counts are %d/%d (<4 on one side). '
+                  'Geometry is preserved; increase upstream z-resolution if needed.' % (base_layers, spin_layers))
+
     nx = xdim + 1
     ny = ydim + 1
     nz = zdim + 1
@@ -218,14 +230,31 @@ def _resolve_spacing(explicit: Optional[Any], mat_data: Dict[str, Any]):
         if arr.size == 3:
             return float(arr[0]), float(arr[1]), float(arr[2])
         raise ValueError('Spacing override must be scalar or length-3.')
-    for key in ('voxelSpacing', 'voxel_size', 'spacing'):
+    # Try common metadata fields
+    for key in ('voxelSpacing', 'voxel_size', 'spacing', 'voxelSize', 'voxel_size_xyz'):
         if key in mat_data:
             val = np.array(mat_data[key]).astype(float).ravel()
             if val.size == 1:
                 return float(val[0])
-            if val.size == 3:
+            if val.size >= 3:
                 return float(val[0]), float(val[1]), float(val[2])
-    raise ValueError('Voxel spacing not provided; use --spacing or include "voxelSpacing" in the MAT-file.')
+    # Handle separate XY / Z spacing
+    xy = None
+    if 'voxelSizeXY' in mat_data:
+        xy = float(np.array(mat_data['voxelSizeXY']).astype(float).ravel()[0])
+    z_from_thickness = None
+    if 'zVoxelThickness' in mat_data:
+        zth = np.array(mat_data['zVoxelThickness']).astype(float).ravel()
+        if zth.size > 0:
+            z_from_thickness = float(np.mean(zth))
+    if xy is not None and z_from_thickness is not None:
+        return xy, xy, z_from_thickness
+    if xy is not None:
+        return xy
+    if z_from_thickness is not None:
+        return z_from_thickness
+
+    raise ValueError('Voxel spacing not provided; include voxelSpacing/voxelSizeXY/zVoxelThickness in the MAT-file.')
 
 
 def _resolve_origin(explicit: Optional[Tuple[float, float, float]], mat_data: Dict[str, Any]) -> Tuple[float, float, float]:
