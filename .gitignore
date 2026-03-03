@@ -4,3 +4,5 @@ exp/__pycache__*
 data_analysis/results*
 master-main*
 .DS_Store
+
+Matlab/gnn_prep_spinodal/out*
