@@ -1,5 +1,5 @@
 function test_gnn_prep_spinodal()
-%TEST_GNN_PREP_SPINODAL Minimal regression checks for gnn_prep_spinodal.
+%TEST_GNN_PREP_SPINODAL Minimal regression checks for the structural pipeline.
 
     testsDir = fileparts(mfilename('fullpath'));
     moduleRoot = fileparts(testsDir);
@@ -19,6 +19,9 @@ function test_gnn_prep_spinodal()
     inpData = read_abaqus_inp(inpPath);
     fullGraph = build_full_reference_graph(inpData, 'ElsetName', 'SPINODAL_SHELL');
     fullGraph = attach_nodal_data(fullGraph, read_abaqus_nodal_csv(csvPath), 'Strict', false);
+    [structGraphA, skeletonGraphA, debugA, fullGraphA] = extract_structural_graph(fullGraph, 'DetailLevel', 0.20);
+    [structGraphB, skeletonGraphB] = extract_structural_graph(fullGraph, 'DetailLevel', 0.20);
+    fullGraph = fullGraphA;
 
     assert(fullGraph.num_nodes > 0, 'Full graph has no nodes.');
     assert(size(fullGraph.edges_local, 1) > 0, 'Full graph has no edges.');
@@ -27,52 +30,68 @@ function test_gnn_prep_spinodal()
         'Node data rows do not match full graph node count.');
     assert(isequal(fullGraph.node_data_table.Label, fullGraph.node_labels), ...
         'Label alignment mismatch after attach_nodal_data.');
+    assert(isfield(fullGraph, 'node_thickness') && numel(fullGraph.node_thickness) == fullGraph.num_nodes, ...
+        'Full graph is missing node thickness.');
+    assert(isfield(fullGraph, 'node_radius') && numel(fullGraph.node_radius) == fullGraph.num_nodes, ...
+        'Full graph is missing node radius.');
 
-    downA = downsample_graph_deterministic(fullGraph, 'DetailLevel', 0.20);
-    downB = downsample_graph_deterministic(fullGraph, 'DetailLevel', 0.20);
-    downGridA = downsample_graph_deterministic(fullGraph, ...
-        'DetailLevel', 0.20, 'NodeSelectionMethod', 'grid');
-    downGridB = downsample_graph_deterministic(fullGraph, ...
-        'DetailLevel', 0.20, 'NodeSelectionMethod', 'grid');
-    downHybridA = downsample_graph_deterministic(fullGraph, ...
-        'DetailLevel', 0.20, 'NodeSelectionMethod', 'hybrid');
-    downHybridB = downsample_graph_deterministic(fullGraph, ...
-        'DetailLevel', 0.20, 'NodeSelectionMethod', 'hybrid');
-    midExpA = downsample_midpoint_experimental(downHybridA);
-    midExpB = downsample_midpoint_experimental(downHybridA);
-
-    assert(downA.num_nodes <= fullGraph.num_nodes, 'Downsampled graph is larger than full graph.');
-    assert(isequal(downA.node_labels, downB.node_labels), ...
-        'Downsampling is not deterministic for identical inputs.');
-    assert(isequal(downGridA.node_labels, downGridB.node_labels), ...
-        'Grid downsampling is not deterministic for identical inputs.');
-    assert(isequal(downHybridA.node_labels, downHybridB.node_labels), ...
-        'Hybrid downsampling is not deterministic for identical inputs.');
-    assert(isequal(midExpA.node_coords, midExpB.node_coords), ...
-        'Experimental midpoint graph is not deterministic for identical inputs.');
-    if midExpA.num_nodes > 0
-        assert(isfield(midExpA, 'node_data_table') && any(strcmp(midExpA.node_data_table.Properties.VariableNames, 'VerticalGap')), ...
-            'Experimental midpoint graph missing VerticalGap node attribute.');
-        assert(isfield(midExpA, 'node_data_table') && any(strcmp(midExpA.node_data_table.Properties.VariableNames, 'Distance')), ...
-            'Experimental midpoint graph missing Distance node attribute.');
-        assert(all(midExpA.node_data_table.VerticalGap >= 0), ...
-            'Experimental midpoint graph has negative VerticalGap.');
-        if isfield(midExpA, 'midpoint_info')
-            info = midExpA.midpoint_info;
-            if isfield(info, 'n_midpoint_nodes_dense') && isfield(info, 'n_midpoint_nodes_sparse')
-                assert(info.n_midpoint_nodes_sparse <= info.n_midpoint_nodes_dense, ...
-                    'Experimental midpoint sparsification increased node count.');
-            end
-        end
+    assert(skeletonGraphA.num_nodes > 0, 'Skeleton graph has no nodes.');
+    assert(structGraphA.num_nodes > 0, 'Structural graph has no nodes.');
+    assert(structGraphA.num_nodes <= skeletonGraphA.num_nodes, ...
+        'Structural graph should not have more nodes than skeleton graph.');
+    assert(size(structGraphA.edge_index, 1) == 2, ...
+        'Structural graph edge_index must be 2xE.');
+    assert(numel(structGraphA.reduced_node_to_full_indices) == structGraphA.num_nodes, ...
+        'Structural graph node-to-full mapping size mismatch.');
+    assert(numel(structGraphA.edge_polyline) == size(structGraphA.edges_local, 1), ...
+        'Structural graph edge polyline count mismatch.');
+    assert(isfield(structGraphA, 'cleanup_info') && isstruct(structGraphA.cleanup_info), ...
+        'Structural graph is missing cleanup metadata.');
+    assert(isfield(skeletonGraphA, 'node_thickness') && numel(skeletonGraphA.node_thickness) == skeletonGraphA.num_nodes, ...
+        'Skeleton graph is missing node thickness.');
+    assert(isfield(structGraphA, 'node_thickness') && numel(structGraphA.node_thickness) == structGraphA.num_nodes, ...
+        'Structural graph is missing node thickness.');
+    assert(isfield(structGraphA, 'edge_thickness_min') && numel(structGraphA.edge_thickness_min) == size(structGraphA.edges_local, 1), ...
+        'Structural graph is missing edge thickness summaries.');
+    assert(isfield(debugA, 'structural_before_cleanup'), ...
+        'Structural debug output is missing pre-cleanup graph.');
+    assert(structGraphA.num_nodes <= debugA.structural_before_cleanup.num_nodes, ...
+        'Cleanup should not increase structural node count.');
+    if ~isempty(structGraphA.edge_length)
+        assert(all(structGraphA.edge_length >= 0), ...
+            'Structural graph edge lengths must be non-negative.');
     end
-    assert(all(ismember(fullGraph.boundary_labels, downA.node_labels)), ...
-        'Not all full-graph boundary nodes were preserved in downsample.');
+
+    assert(isequal(skeletonGraphA.node_labels, skeletonGraphB.node_labels), ...
+        'Skeleton extraction is not deterministic for identical inputs.');
+    assert(isequal(structGraphA.node_labels, structGraphB.node_labels), ...
+        'Structural extraction is not deterministic for identical inputs.');
+    assert(isequal(structGraphA.edges_local, structGraphB.edges_local), ...
+        'Structural graph edges are not deterministic for identical inputs.');
 
     tmpOut = fullfile(moduleRoot, 'out', 'test_export');
-    paths = export_graph_csv(downA, tmpOut, 'test_graph');
-    assert(isfile(paths.nodes_csv_path), 'Missing exported nodes CSV.');
-    assert(isfile(paths.edges_csv_path), 'Missing exported edges CSV.');
-    assert(isfile(paths.mat_path), 'Missing exported MAT file.');
+    fullPaths = export_graph_csv(fullGraph, tmpOut, 'test_full_graph');
+    skeletonPaths = export_graph_csv(skeletonGraphA, tmpOut, 'test_skeleton_graph');
+    structPaths = export_graph_csv(structGraphA, tmpOut, 'test_structural_graph');
+    assert(isfile(fullPaths.nodes_csv_path), 'Missing exported full nodes CSV.');
+    assert(isfile(fullPaths.edges_csv_path), 'Missing exported full edges CSV.');
+    assert(isfile(fullPaths.mat_path), 'Missing exported full MAT file.');
+    assert(isfile(skeletonPaths.nodes_csv_path), 'Missing exported skeleton nodes CSV.');
+    assert(isfile(skeletonPaths.edges_csv_path), 'Missing exported skeleton edges CSV.');
+    assert(isfile(skeletonPaths.mat_path), 'Missing exported skeleton MAT file.');
+    assert(isfile(structPaths.nodes_csv_path), 'Missing exported structural nodes CSV.');
+    assert(isfile(structPaths.edges_csv_path), 'Missing exported structural edges CSV.');
+    assert(isfile(structPaths.mat_path), 'Missing exported structural MAT file.');
+
+    outputs = main_spinodal_gnn_prep(inpPath, csvPath, ...
+        'ElsetName', 'SPINODAL_SHELL', ...
+        'StructuralDetailLevel', 0.20, ...
+        'MakePlots', false, ...
+        'SavePlots', false, ...
+        'OutDir', fullfile(moduleRoot, 'out'), ...
+        'Prefix', 'test_pipeline');
+    assert(isfield(outputs, 'full_graph') && isfield(outputs, 'skeleton_graph') && isfield(outputs, 'structural_graph'), ...
+        'Main pipeline outputs are missing required graph products.');
 
     fprintf('test_gnn_prep_spinodal passed.\n');
 end

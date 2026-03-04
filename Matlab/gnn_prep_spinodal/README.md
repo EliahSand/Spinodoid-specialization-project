@@ -1,6 +1,12 @@
 # gnn_prep_spinodal
 
-MATLAB module for converting Abaqus shell mesh + nodal CSV outputs into graph data for GNN preprocessing.
+MATLAB module for converting Abaqus shell mesh + nodal CSV outputs into:
+
+- a full reference graph
+- a 1-node-thick skeleton graph
+- a reduced structural graph
+
+This module is now centered on the structural-graph workflow. Legacy generic downsampling methods are not part of the active pipeline.
 
 ## What It Does
 
@@ -8,27 +14,24 @@ MATLAB module for converting Abaqus shell mesh + nodal CSV outputs into graph da
   - node labels and coordinates (`*Node`)
   - element connectivity (`*Element`)
   - element sets (`*Elset`, including `generate`)
-- Selects a region from an elset (e.g., `SPINODAL_SHELL`) or auto-detects a spinodal/top elset.
+- Selects a region from an elset (for example `SPINODAL_SHELL`) or auto-detects a spinodal/top elset.
 - Builds a full reference graph:
   - nodes = selected mesh nodes
   - edges = unique shell edges derived from element connectivity
   - boundary nodes from edge use-count (edges used by only one element)
 - Maps nodal CSV fields (`Label`, `U1`, etc.) to graph node indices.
-- Builds a deterministic downsampled graph with tunable detail:
-  - boundary retention controlled by `BoundaryKeepRatio`
-  - interior sampling methods: `farthest`, `grid`, `hybrid`
-  - optional shortest-path augmentation to preserve connectivity/topology
-- Exports graph tables and simple plots.
+- Extracts a 1-node-thick skeleton/centerline graph from the full graph.
+- Compresses the skeleton into a reduced structural graph while preserving topology and path geometry.
+- Exports graph tables and plots.
 
 ## Folder Layout
 
-```
+```text
 gnn_prep_spinodal/
   src/
+    graph/
     io/
     mesh/
-    graph/
-    downsample/
     vis/
   examples/
   tests/
@@ -38,119 +41,137 @@ gnn_prep_spinodal/
 
 ## Quick Start
 
-Run:
+Run the hardcoded entry script:
+
+```matlab
+run_main_spinodal_gnn_prep
+```
+
+Or call the main function directly:
+
+```matlab
+outputs = main_spinodal_gnn_prep(inpPath, csvPath, ...
+    'ElsetName', 'SPINODAL_SHELL', ...
+    'StructuralDetailLevel', 0.20, ...
+    'OutDir', 'Matlab/gnn_prep_spinodal/out');
+```
+
+Minimal example script:
 
 ```matlab
 run('Matlab/gnn_prep_spinodal/examples/example_build_graphs.m')
 ```
 
-Method comparison example:
-
-```matlab
-run('Matlab/gnn_prep_spinodal/examples/example_compare_downsample_methods.m')
-```
-
-The comparison script also runs an experimental midpoint graph generator from:
-`src/downsample/downsample_midpoint_experimental.m`.
-
-Or call directly:
-
-```matlab
-outputs = main_spinodal_gnn_prep(inpPath, csvPath, ...
-    'ElsetName', 'SPINODAL_SHELL', ...
-    'DetailLevel', 0.25, ...
-    'DownsampleMethod', 'hybrid', ...
-    'OutDir', 'Matlab/gnn_prep_spinodal/out');
-```
-
 ## Main Output
 
-- `*_nodes.csv`: node indices, labels, coordinates, boundary mask, optional node attributes.
-- `*_edges.csv`: graph edge list with node indices + node labels.
-- `*.mat`: serialized graph struct.
-- Optional `.png` plots for full and downsampled graphs.
+- `full_graph_*`: full reference graph export
+- `skeleton_graph_*`: extracted 1-node-thick skeleton graph export
+- `structural_graph_*`: reduced structural graph export
+- `*.mat`: serialized graph structs
+- optional `.png` plots for:
+  - full reference graph
+  - structural overlay
 
 ## Out Folder Structure
 
 Each run is written to its own subfolder:
 
-```
+```text
 out/
   <prefix>_<timestamp>/
     metadata/run_info.txt
     full_graph/
       data/
       plots/
-    downsampled_graph/
-      data/
-      plots/
-    line_graph/            % only when DownsampleOutputMode='line'
+    structural_graph/
       data/
       plots/
 ```
 
-## Extra Downsampling (Single Line Graph)
+## Structural Graph
 
-Use:
+Build the reduced skeleton/centerline graph directly from the dense reference graph:
 
 ```matlab
 outputs = main_spinodal_gnn_prep(inpPath, csvPath, ...
-    'DetailLevel', 0.08, ...
-    'DownsampleOutputMode', 'line', ...
-    'LineNodeBudget', 40);
+    'ElsetName', 'SPINODAL_SHELL', ...
+    'StructuralDetailLevel', 0.20, ...
+    'StructuralMinIslandNodes', 1);
 ```
 
-This creates a component-wise line-like graph from the downsampled mesh.
-`DownsampleOutputMode='line'` simplifies boundary components separately, so multiple major spinodal parts are represented (not just one global line).
+This produces:
 
-To also downsample straight boundary segments in mesh mode:
+- `skeleton_graph_*`: 1-node-thick extracted skeleton graph
+- `structural_graph_*`: compressed structural graph with:
+  - reduced node coordinates
+  - reduced edges
+  - edge path length
+  - edge polyline
+  - edge-to-full-node-path mapping
+  - node mapping back to dense graph node ids
+- `structural_graph_overlay.png`: dense + skeleton + reduced graph overlay
 
-```matlab
-'BoundaryKeepRatio', 0.25, ...
-'BoundaryStraightTolDeg', 6
-```
+## Graph Layers
 
-When `BoundaryKeepRatio < 1`, boundary polylines are re-linked with shortcut edges
-between kept boundary nodes so each spinodal boundary remains connected as a line.
+The structural overlay plot shows several representations of the same spinodal morphology.
 
-## Compare Methods Quickly
+### Dense
 
-Try different deterministic interior selection methods:
+This is the original reference graph built directly from the selected Abaqus shell region.
 
-```matlab
-'DownsampleMethod', 'farthest'   % geodesic spread from boundary seeds
-'DownsampleMethod', 'grid'       % spatial bin representatives
-'DownsampleMethod', 'hybrid'     % junction anchors + grid/farthest fill
-```
+- nodes = all selected mesh nodes
+- edges = local mesh connectivity from the shell elements
 
-For `hybrid`, tune:
+This is the highest-resolution graph and acts as the source geometry/topology for all later steps.
 
-```matlab
-'HybridAnchorFraction', 0.35
-```
+### Skeleton
 
-## Experimental Midpoint Variant
+This is the extracted 1-node-thick centerline network.
 
-Experimental-only function:
+- the dense XY occupancy is rasterized on the native node grid
+- the occupied region is thinned with a topology-preserving skeletonization step
+- the result is converted back into a graph
 
-```matlab
-midGraph = downsample_midpoint_experimental(downsampledMeshGraph, ...
-    'UseInteriorBoundaryOnly', true, ...
-    'ColumnStride', 5, ...
-    'PairMode', 'extremes', ...
-    'ComponentKeepRatio', 0.04, ...
-    'MaxNodesPerComponent', 4);
-```
+This graph captures the medial paths, loops, branches, endpoints, and junctions of the morphology.
 
-This is intentionally separate from `main_spinodal_gnn_prep` / `downsample_graph_deterministic`.
-It builds the graph from component-wise vertical midpoint pairing:
-- each boundary connected component is handled independently
-- boundary nodes are grouped in x-columns
-- midpoint nodes are created from vertical pairs (`PairMode='extremes'` gives one vertical midpoint per selected column)
-- a few representative midpoint nodes are kept per component
-- representative nodes are connected only inside each component (MST), avoiding long global cross-connections
+### Skeleton Nodes
 
-Distance attributes are stored per midpoint node (`VerticalGap`, `Distance`).
+These are the node locations of the skeleton graph.
+
+- they are the discrete centerline sample points after thinning
+- they often still include many degree-2 chain nodes along long branches
+
+They are shown separately so you can see how finely the skeleton is sampled.
+
+### Structural
+
+This is the reduced graph built from the skeleton graph.
+
+- degree-2 chains are collapsed into single reduced edges
+- junctions and endpoints are preserved
+- extra waypoints can be retained depending on `StructuralDetailLevel`
+
+This is the simplified graph intended to represent the main structural morphology with much lower complexity.
+
+Each reduced edge still carries the original path information through:
+
+- `edge_length`
+- `edge_polyline`
+- `edge_full_node_paths`
+
+So a structural edge is a compressed representation of a real path along the skeleton, not just a straight shortcut.
+
+### Structural Nodes
+
+These are the reduced graph nodes kept after chain compression.
+
+They correspond to important anchor points such as:
+
+- endpoints
+- junctions
+- optional intermediate waypoints when more detail is requested
+
+Lower `StructuralDetailLevel` gives fewer structural nodes and a coarser graph. Higher `StructuralDetailLevel` keeps more waypoints and produces a finer reduced graph.
 
 ## Plot Tuning
 

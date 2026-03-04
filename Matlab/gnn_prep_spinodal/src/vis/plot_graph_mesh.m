@@ -45,6 +45,13 @@ function h = plot_graph_mesh(graphData, varargin)
     end
 
     coords = graphData.node_coords;
+    if size(coords, 2) < 2
+        error('plot_graph_mesh:BadCoords', ...
+            'graphData.node_coords must have at least two columns [X,Y].');
+    end
+    if size(coords, 2) < 3
+        coords(:, 3) = 0;
+    end
     x = coords(:, 1) * opts.UnitsScale;
     y = coords(:, 2) * opts.UnitsScale;
     z = coords(:, 3) * opts.UnitsScale;

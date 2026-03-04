@@ -15,7 +15,7 @@ cfg = struct();
 cfg.N            = 2^7;          % grid size (NxNxN). Use powers of two for speed
 cfg.L            = 40e-3;        % physical box length (mm)    (vanligvis 40e-3)
 
-%   NB!  Vox size is L/N
+%   NB! Husk vox size is L/N
 
 cfg.lambda_vox   = 25;          % target feature wavelength in voxels (~rib/ligament spacing)
 cfg.bandwidth    = 2;           % relative shell thickness around target |k| (0.1–0.3)
