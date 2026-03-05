@@ -185,3 +185,9 @@ Useful options for clearer plots:
 'PlotXLabel', 'x [mm]', ...
 'PlotYLabel', 'y [mm]'
 ```
+
+## Method Note
+
+Detailed algorithm notes (dense -> skeleton -> structural, Zhang-Suen thinning, detail level, cleanup, thickness propagation):
+
+- `notes/structural_graph_algorithm_README.md`
