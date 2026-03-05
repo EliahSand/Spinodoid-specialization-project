@@ -1,187 +1,287 @@
-function summary = run_all_analysis()
-%RUN_ALL_ANALYSIS Compare solid vs shell models across all ratios/angles.
-%   summary = run_all_analysis() drives loading, metrics, plotting, PCA, and
-%   aggregated reporting for the lamellar sheet data set.
+function summary = run_all_analysis(opts)
+%RUN_ALL_ANALYSIS Run overlay + curvature analysis for all detected runs.
+%
+% Finds run folders under results/sheets that contain both FEA and
+% FEA_shell CSV outputs, then calls compare_single_run for each.
 
-tic;
+arguments
+    opts.ResultsSheetsRoot (1, :) char = ''
+    opts.OutputRoot (1, :) char = ''
+    opts.DoPlots (1, 1) logical = true
+    opts.WriteFiles (1, 1) logical = true
+    opts.MakeOverlaySummary (1, 1) logical = true
+end
 
+tStart = tic;
 scriptDir = fileparts(mfilename('fullpath'));
-addpath(scriptDir);
+repoRoot = fullfile(scriptDir, '..', '..', '..');
 
-trLabels = {'tr50', 'tr100', 'tr200'};
-thetasDeg = [0, 30, 45, 60, 90];
-overlayFields = {'U1','U2','U3','S_11','S_22','S_Mises'};
-
-doPCA = license('test', 'statistics_toolbox') && exist('pca', 'file') == 2;
-
-resultsRoot = fullfile(scriptDir, '..', 'results');
-analysisRoot = fullfile(resultsRoot, 'analysis');
-summaryRoot = fullfile(resultsRoot, 'summary');
-ensure_dir(analysisRoot);
-ensure_dir(summaryRoot);
-
-overlayData = struct();
-for fIdx = 1:numel(overlayFields)
-    overlayData.(overlayFields{fIdx}) = struct();
+if isempty(opts.ResultsSheetsRoot)
+    resultsSheetsRoot = fullfile(scriptDir, '..', '..', 'results', 'sheets');
+else
+    resultsSheetsRoot = resolve_path(opts.ResultsSheetsRoot, repoRoot);
 end
+resultsSheetsRoot = char(resultsSheetsRoot);
 
-summaryTemplate = struct('trLabel', '', 'thetaDeg', NaN, 'metrics', [], ...
-    'status', 'pending', 'dispAccept', false, 'stressAccept', false, ...
-    'dispMeanRel', NaN, 'stressMeanRel', NaN, 'overallScore', NaN);
-summary(numel(trLabels), numel(thetasDeg)) = summaryTemplate; %#ok<AGROW>
-
-dispThresh = struct('MaxRel', 0.15, 'R', 0.95);
-stressThresh = struct('MaxRel', 0.25, 'R', 0.90);
-
-fprintf('--- Running solid vs shell comparison across %d ratios x %d angles ---\n', ...
-    numel(trLabels), numel(thetasDeg));
-
-for iTr = 1:numel(trLabels)
-    for jTh = 1:numel(thetasDeg)
-        trLabel = trLabels{iTr};
-        theta = thetasDeg(jTh);
-        fprintf('\n[%s | \\theta = %d°] Loading data...\n', trLabel, theta);
-        try
-            [solid, shell] = load_solid_shell_pair(trLabel, theta);
-            [metrics, errorTable] = compare_solid_shell(solid, shell);
-            metricsTbl = metrics_to_table(metrics);
-
-            outputDir = fullfile(analysisRoot, trLabel, sprintf('ang%03d', theta));
-            ensure_dir(outputDir);
-            writetable(metricsTbl, fullfile(outputDir, 'metrics_summary.csv'));
-            writetable(errorTable, fullfile(outputDir, 'node_errors.csv'));
-            save(fullfile(outputDir, 'metrics.mat'), 'metrics');
-            save(fullfile(outputDir, 'error_table.mat'), 'errorTable');
-
-            plot_scatter_fields(solid, shell, metrics, trLabel, theta, outputDir);
-            plot_error_histograms(errorTable, metrics, trLabel, theta, outputDir);
-            
-            % Spatial maps proved uninformative for these midsections; rely on
-            % curvature profiles and overlays instead.
-            plot_curvature_profiles(solid, shell, metrics, trLabel, theta, outputDir);
-            plot_curvature(solid, shell, trLabel, theta, outputDir);
-            if doPCA
-                analyze_error_patterns(solid, shell, trLabel, theta, outputDir);
-            end
-
-            dispFields = {'U1', 'U2', 'U3'};
-            stressFields = {'S_11', 'S_22', 'S_Mises'};
-            dispAccept = all(cellfun(@(f) metrics.(f).MaxRel < dispThresh.MaxRel ...
-                && metrics.(f).R > dispThresh.R, dispFields));
-            stressAccept = all(cellfun(@(f) metrics.(f).MaxRel < stressThresh.MaxRel ...
-                && metrics.(f).R > stressThresh.R, stressFields));
-
-            summary(iTr, jTh).trLabel = trLabel;
-            summary(iTr, jTh).thetaDeg = theta;
-            summary(iTr, jTh).metrics = metrics;
-            summary(iTr, jTh).status = 'ok';
-            summary(iTr, jTh).dispAccept = dispAccept;
-            summary(iTr, jTh).stressAccept = stressAccept;
-            summary(iTr, jTh).dispMeanRel = mean(cellfun(@(f) metrics.(f).MeanRel, dispFields));
-            summary(iTr, jTh).stressMeanRel = mean(cellfun(@(f) metrics.(f).MeanRel, stressFields));
-            summary(iTr, jTh).overallScore = mean([summary(iTr, jTh).dispMeanRel, summary(iTr, jTh).stressMeanRel]);
-
-            % Store displacement/stress data for overlay plots per thickness ratio
-            fieldsToStore = overlayFields;
-            for fIdx = 1:numel(fieldsToStore)
-                fname = fieldsToStore{fIdx};
-                if ~isfield(overlayData.(fname), trLabel)
-                    overlayData.(fname).(trLabel) = struct('thetaDeg', [], 'solid', {{}}, 'shell', {{}}); %#ok<CCAT>
-                end
-                overlayData.(fname).(trLabel).thetaDeg(end+1) = theta;
-                overlayData.(fname).(trLabel).solid{end+1} = double(solid.(fname));
-                overlayData.(fname).(trLabel).shell{end+1} = double(shell.(fname));
-            end
-
-            fprintf('Component-level metrics:\n');
-            print_component_summary(metrics, {'U1','U2','U3','S_11','S_22','S_Mises'});
-            fprintf('  Displacements: %s (MaxRel < %.2f, R > %.2f)\n', ...
-                ternary(dispAccept, 'ACCEPTABLE', 'NOT acceptable'), dispThresh.MaxRel, dispThresh.R);
-            fprintf('  Stresses:      %s (MaxRel < %.2f, R > %.2f)\n', ...
-                ternary(stressAccept, 'ACCEPTABLE', 'NOT acceptable'), stressThresh.MaxRel, stressThresh.R);
-        catch ME
-            summary(iTr, jTh).trLabel = trLabel;
-            summary(iTr, jTh).thetaDeg = theta;
-            summary(iTr, jTh).status = sprintf('failed: %s', ME.message);
-            stackMsg = "";
-            if ~isempty(ME.stack)
-                s = ME.stack(1);
-                [~, fname, ext] = fileparts(s.file);
-                stackMsg = sprintf(' (%s%s:%d)', fname, ext, s.line);
-            end
-            warning('Failed for %s @ %d°: %s%s', trLabel, theta, ...
-                ME.getReport('extended', 'hyperlinks', 'off'), stackMsg);
-        end
-    end
+if isempty(opts.OutputRoot)
+    outputRoot = fullfile(scriptDir, '..', '..', 'results', 'analysis', 'single_runs');
+else
+    outputRoot = resolve_path(opts.OutputRoot, repoRoot);
 end
+outputRoot = char(outputRoot);
 
-overviewTbl = build_overview_table(summary);
-writetable(overviewTbl, fullfile(summaryRoot, 'summary_overview.csv'));
-save(fullfile(summaryRoot, 'comparison_summary.mat'), 'summary', 'trLabels', 'thetasDeg');
-plot_aggregated_metrics(summary, trLabels, thetasDeg, summaryRoot);
-plot_overlay_series(overlayData, summaryRoot);
+ensure_dir(outputRoot);
+runFolders = discover_run_folders(resultsSheetsRoot);
 
-toc;
-
-report_global_summary(overviewTbl);
-end
-
-function print_component_summary(metrics, fields)
-for i = 1:numel(fields)
-    name = fields{i};
-    m = metrics.(name);
-    fprintf('  %-6s MAE=%8.3g | MaxRel=%7.3g | R=%6.3f\n', ...
-        name, m.MAE, m.MaxRel, m.R);
-end
-end
-
-function overviewTbl = build_overview_table(summary)
-rows = [];
-for i = 1:numel(summary)
-    s = summary(i);
-    rows = [rows; {s.trLabel, s.thetaDeg, s.status, s.dispMeanRel, s.stressMeanRel, ...
-        s.dispAccept, s.stressAccept, s.overallScore}]; %#ok<AGROW>
-end
-overviewTbl = cell2table(rows, 'VariableNames', ...
-    {'trLabel','thetaDeg','status','dispMeanRel','stressMeanRel','dispAccept','stressAccept','overallScore'});
-end
-
-function report_global_summary(overviewTbl)
-okIdx = strcmp(overviewTbl.status, 'ok');
-if ~any(okIdx)
-    fprintf('\nNo successful model comparisons to summarize.\n');
+if isempty(runFolders)
+    warning('run_all_analysis:NoRunsFound', ...
+        'No run folders with both FEA and FEA_shell CSV files were found under %s', ...
+        resultsSheetsRoot);
+    summary = table();
     return;
 end
 
-validTbl = overviewTbl(okIdx, :);
-[~, bestDispIdx] = min(validTbl.dispMeanRel);
-[~, bestStressIdx] = min(validTbl.stressMeanRel);
+fprintf('Found %d run folder(s). Starting analysis...\n', numel(runFolders));
 
-bestDisp = validTbl(bestDispIdx, :);
-bestStress = validTbl(bestStressIdx, :);
+overlayFields = {'U1','U2','U3','S_11','S_22','S_33','S_12','S_13','S_23','S_Mises'};
+overlayData = init_overlay_data(overlayFields);
 
-fprintf('\n=== Global summary ===\n');
-fprintf('Best displacement agreement: %s @ %d° (mean rel = %.3g)\n', ...
-    bestDisp.trLabel{1}, bestDisp.thetaDeg, bestDisp.dispMeanRel);
-fprintf('Best stress agreement:        %s @ %d° (mean rel = %.3g)\n', ...
-    bestStress.trLabel{1}, bestStress.thetaDeg, bestStress.stressMeanRel);
+rows = {};
+for i = 1:numel(runFolders)
+    runFolder = runFolders{i};
+    [~, runName] = fileparts(runFolder);
+    runOutputDir = fullfile(outputRoot, runName);
+    fprintf('\n[%d/%d] %s\n', i, numel(runFolders), runName);
 
-highDisp = validTbl(validTbl.dispMeanRel > 0.5, :);
-highStress = validTbl(validTbl.stressMeanRel > 0.5, :);
-if ~isempty(highDisp)
-    fprintf('Combinations with large displacement deviations (>0.5 mean rel):\n');
-    disp(highDisp(:, {'trLabel','thetaDeg','dispMeanRel'}));
+    status = 'ok';
+    kTheory = NaN;
+    kSolid = NaN;
+    kShell = NaN;
+    relSolid = NaN;
+    relShell = NaN;
+    trLabel = '';
+    thetaDeg = NaN;
+
+    try
+        compare_single_run(runFolder, ...
+            'OutputDir', runOutputDir, ...
+            'DoPlots', opts.DoPlots, ...
+            'WriteFiles', opts.WriteFiles);
+
+        [solid, shell] = load_run_pair_local(runFolder);
+        [trLabelChar, thetaDeg] = parse_run_tags_local(runName, runFolder);
+        trLabel = trLabelChar;
+
+        [curv, ~] = check_curvature_single_run(runFolder, solid, shell);
+        kTheory = curv.theory.kappa;
+        kSolid = curv.solid.kappaCircle;
+        kShell = curv.shell.kappaCircle;
+        relSolid = curv.solid.RelErrTheory;
+        relShell = curv.shell.RelErrTheory;
+
+        overlayData = append_overlay_data(overlayData, overlayFields, trLabelChar, thetaDeg, solid, shell);
+    catch ME
+        status = 'failed';
+        warning('run_all_analysis:RunFailed', ...
+            'Run failed for %s:\n%s', runFolder, ...
+            ME.getReport('extended', 'hyperlinks', 'off'));
+    end
+
+    rows(end+1, :) = {runName, runFolder, trLabel, thetaDeg, status, ...
+        kTheory, kSolid, kShell, relSolid, relShell}; %#ok<AGROW>
 end
-if ~isempty(highStress)
-    fprintf('Combinations with large stress deviations (>0.5 mean rel):\n');
-    disp(highStress(:, {'trLabel','thetaDeg','stressMeanRel'}));
-end
+
+summary = cell2table(rows, 'VariableNames', ...
+    {'RunName','RunFolder','RatioTag','ThetaDeg','Status', ...
+     'KappaTheory_1_per_m','KappaSolid_1_per_m','KappaShell_1_per_m', ...
+     'RelErrSolidToTheory','RelErrShellToTheory'});
+
+writetable(summary, fullfile(outputRoot, 'run_all_summary.csv'));
+
+if opts.MakeOverlaySummary && opts.DoPlots
+    overlayOutDir = fullfile(outputRoot, '_overlay_summary');
+    plot_overlay_series(overlayData, overlayOutDir);
+    fprintf('Saved overlay summary plots to: %s\n', overlayOutDir);
 end
 
-function out = ternary(cond, a, b)
-if cond
-    out = a;
+fprintf('\nFinished run_all_analysis in %.2f s.\n', toc(tStart));
+end
+
+function pOut = resolve_path(pIn, repoRoot)
+pOut = pIn;
+if isempty(pIn)
+    return;
+end
+if is_absolute_path(pIn)
+    return;
+end
+pOut = fullfile(repoRoot, pIn);
+end
+
+function tf = is_absolute_path(p)
+if isempty(p)
+    tf = false;
+    return;
+end
+if ispc
+    tf = ~isempty(regexp(p, '^[A-Za-z]:[\\/]', 'once')) || startsWith(p, '\\');
 else
-    out = b;
+    tf = startsWith(p, '/');
+end
+end
+
+function runFolders = discover_run_folders(resultsSheetsRoot)
+runFolders = {};
+if ~isfolder(resultsSheetsRoot)
+    return;
+end
+
+tmp = {};
+allDirs = collect_subdirs(resultsSheetsRoot);
+for i = 1:numel(allDirs)
+    runFolder = allDirs{i};
+    shellDir = fullfile(runFolder, 'FEA_shell');
+    if ~isfolder(shellDir)
+        continue;
+    end
+    solidCsv = dir(fullfile(runFolder, 'FEA', '*.csv'));
+    shellCsv = dir(fullfile(shellDir, '*.csv'));
+    if isempty(solidCsv) || isempty(shellCsv)
+        continue;
+    end
+    tmp{end+1,1} = runFolder; %#ok<AGROW>
+end
+
+if isempty(tmp)
+    runFolders = {};
+else
+    runFolders = sort(unique(tmp));
+end
+end
+
+function allDirs = collect_subdirs(rootDir)
+rootDir = char(rootDir);
+if ~isfolder(rootDir)
+    allDirs = {};
+    return;
+end
+
+% Robust recursive listing using MATLAB's path generation.
+% This avoids cell/type edge cases in manual queue traversal.
+allPath = genpath(rootDir);
+allDirs = strsplit(allPath, pathsep);
+allDirs = allDirs(~cellfun('isempty', allDirs));
+allDirs = unique(allDirs, 'stable');
+end
+
+function overlayData = init_overlay_data(fields)
+overlayData = struct();
+for i = 1:numel(fields)
+    overlayData.(fields{i}) = struct();
+end
+end
+
+function overlayData = append_overlay_data(overlayData, fields, trLabel, thetaDeg, solid, shell)
+groupTag = regexp(trLabel, 'tr\d+', 'match', 'once');
+if isempty(groupTag)
+    groupTag = 'misc';
+end
+
+for i = 1:numel(fields)
+    fname = fields{i};
+    if ~ismember(fname, solid.Properties.VariableNames) || ~ismember(fname, shell.Properties.VariableNames)
+        continue;
+    end
+
+    if ~isfield(overlayData.(fname), groupTag)
+        overlayData.(fname).(groupTag) = struct('thetaDeg', [], 'solid', {{}}, 'shell', {{}});
+    end
+    overlayData.(fname).(groupTag).thetaDeg(end+1) = thetaDeg;
+    overlayData.(fname).(groupTag).solid{end+1} = double(solid.(fname));
+    overlayData.(fname).(groupTag).shell{end+1} = double(shell.(fname));
+end
+end
+
+function [trLabel, thetaDeg] = parse_run_tags_local(runName, runFolder)
+trLabel = runName;
+thetaDeg = NaN;
+
+trToken = regexp(runName, 'tr\d+', 'match', 'once');
+if ~isempty(trToken)
+    trLabel = trToken;
+end
+
+angToken = regexp(runName, 'ang\d+', 'match', 'once');
+if ~isempty(angToken)
+    thetaDeg = str2double(angToken(4:end));
+    return;
+end
+
+runNameLower = lower(runName);
+if contains(runNameLower, 'dirx')
+    thetaDeg = 0;
+    return;
+elseif contains(runNameLower, 'diry')
+    thetaDeg = 90;
+    return;
+end
+
+logPath = fullfile(runFolder, 'run_log.txt');
+if ~isfile(logPath)
+    return;
+end
+
+fid = fopen(logPath, 'r');
+if fid < 0
+    return;
+end
+cleanupObj = onCleanup(@() fclose(fid)); %#ok<NASGU>
+while true
+    line = fgetl(fid);
+    if ~ischar(line)
+        break;
+    end
+    lineLow = lower(strtrim(line));
+    if startsWith(lineLow, 'line_direction:')
+        if contains(lineLow, 'x')
+            thetaDeg = 0;
+        elseif contains(lineLow, 'y')
+            thetaDeg = 90;
+        end
+        break;
+    end
+end
+end
+
+function [solid, shell] = load_run_pair_local(runFolder)
+solid = load_spinodal_model(runFolder, 'solid');
+shell = load_spinodal_model(runFolder, 'shell');
+
+vars = solid.Properties.VariableNames;
+for i = 1:numel(vars)
+    v = solid.(vars{i});
+    if ~isnumeric(v)
+        solid.(vars{i}) = double(str2double(string(v)));
+    else
+        solid.(vars{i}) = double(v);
+    end
+end
+
+vars = shell.Properties.VariableNames;
+for i = 1:numel(vars)
+    v = shell.(vars{i});
+    if ~isnumeric(v)
+        shell.(vars{i}) = double(str2double(string(v)));
+    else
+        shell.(vars{i}) = double(v);
+    end
+end
+
+solid = sortrows(solid, 'Label');
+shell = sortrows(shell, 'Label');
+
+if ~isequal(solid.Label, shell.Label)
+    error('run_all_analysis:LabelMismatch', ...
+        'Label mismatch for %s (solid/shell nodes do not match).', runFolder);
 end
 end

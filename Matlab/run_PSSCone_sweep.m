@@ -27,7 +27,6 @@ for r = ratios
     params.t_spin = r * baseThickness;
     params.resultsRoot = ratioFolder;
     params.tilesXY = [2 3];
-    params.align_with_cube = true;
 
     % Parallel loop over angles (remember to start parallell pooling)
     parfor ia = 1:numel(angles)

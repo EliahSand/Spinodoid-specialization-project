@@ -1,40 +1,34 @@
 function [metrics, errorTable, outputDir] = compare_single_run(runFolder, opts)
-%COMPARE_SINGLE_RUN Compare SOLID vs FEA_shell for a single run folder.
-%   [metrics, errorTable, outputDir] = compare_single_run(runFolder) loads
-%   FEA (solid) and FEA_shell (shell) CSVs from runFolder, computes node-wise
-%   errors, and writes analysis outputs under results/analysis/single_runs.
-%
-%   Optional name-value pairs:
-%     OutputDir  - override output directory (default: results/analysis/single_runs/<runName>)
-%     DoPlots    - enable diagnostic plots (default: true)
-%     DoPCA      - enable PCA error analysis (default: false)
-%     WriteFiles - write CSV/MAT outputs (default: true)
+%COMPARE_SINGLE_RUN Single-run comparison: overlays + curvature checks.
+%   [metrics, errorTable, outputDir] = compare_single_run(runFolder)
+%   loads FEA (solid) and FEA_shell (shell), generates overlay plots, and
+%   runs all curvature comparisons.
 
 arguments
     runFolder (1, :) char
     opts.OutputDir (1, :) char = ''
     opts.DoPlots (1, 1) logical = true
-    opts.DoPCA (1, 1) logical = false
     opts.WriteFiles (1, 1) logical = true
 end
 
+runFolder = resolve_run_folder(char(runFolder));
 if ~isfolder(runFolder)
     error('compare_single_run:MissingFolder', 'Run folder not found: %s', runFolder);
 end
 
-runFolder = char(runFolder);
 [~, runName] = fileparts(runFolder);
 
 scriptDir = fileparts(mfilename('fullpath'));
-resultsRoot = fullfile(scriptDir, '..', 'results', 'analysis', 'single_runs');
+repoRoot = fullfile(scriptDir, '..', '..', '..');
+resultsRoot = fullfile(scriptDir, '..', '..', 'results', 'analysis', 'single_runs');
 if isempty(opts.OutputDir)
     outputDir = fullfile(resultsRoot, runName);
 else
-    outputDir = opts.OutputDir;
+    outputDir = resolve_path(char(opts.OutputDir), repoRoot);
 end
 
 [solid, shell] = load_run_pair(runFolder);
-[metrics, errorTable] = compare_solid_shell(solid, shell);
+[metrics, errorTable] = compute_basic_metrics(solid, shell);
 [curvatureCheck, curvatureTable] = check_curvature_single_run(runFolder, solid, shell);
 
 if opts.WriteFiles || opts.DoPlots
@@ -42,32 +36,17 @@ if opts.WriteFiles || opts.DoPlots
 end
 
 if opts.WriteFiles
-    metricsTbl = metrics_to_table(metrics);
-    writetable(metricsTbl, fullfile(outputDir, 'metrics_summary.csv'));
-    writetable(errorTable, fullfile(outputDir, 'node_errors.csv'));
     writetable(curvatureTable, fullfile(outputDir, 'curvature_check.csv'));
-    save(fullfile(outputDir, 'metrics.mat'), 'metrics');
-    save(fullfile(outputDir, 'error_table.mat'), 'errorTable');
     save(fullfile(outputDir, 'curvature_check.mat'), 'curvatureCheck');
 end
 
 if opts.DoPlots
     [trLabel, thetaDeg] = parse_run_tags(runName, runFolder);
-    plot_scatter_fields(solid, shell, metrics, trLabel, thetaDeg, outputDir);
+    plot_scatter_fields(solid, shell, trLabel, thetaDeg, outputDir);
     plot_curvature(solid, shell, trLabel, thetaDeg, outputDir, ...
         'CurvatureCheck', curvatureCheck);
     plot_curvature_offset_removed(solid, shell, trLabel, thetaDeg, outputDir, ...
         'CurvatureCheck', curvatureCheck);
-    %plot_error_histograms(errorTable, metrics, trLabel, thetaDeg, outputDir);
-    %plot_curvature_profiles(solid, shell, metrics, trLabel, thetaDeg, outputDir);
-    if opts.DoPCA
-        if license('test', 'statistics_toolbox') && exist('pca', 'file') == 2
-            analyze_error_patterns(solid, shell, trLabel, thetaDeg, outputDir);
-        else
-            warning('compare_single_run:PCAUnavailable', ...
-                'Skipping PCA: Statistics Toolbox (pca) not available.');
-        end
-    end
 end
 
 if ~isnan(curvatureCheck.theory.kappa)
@@ -84,6 +63,43 @@ fprintf('[%s] Comparison complete. Output: %s\n', runName, outputDir);
 
 end
 
+function runFolderOut = resolve_run_folder(runFolderIn)
+runFolderOut = runFolderIn;
+if isfolder(runFolderOut)
+    return;
+end
+
+scriptDir = fileparts(mfilename('fullpath'));
+repoRoot = fullfile(scriptDir, '..', '..', '..');
+alt = fullfile(repoRoot, runFolderIn);
+if isfolder(alt)
+    runFolderOut = alt;
+end
+end
+
+function pOut = resolve_path(pIn, repoRoot)
+pOut = pIn;
+if isempty(pIn)
+    return;
+end
+if is_absolute_path(pIn)
+    return;
+end
+pOut = fullfile(repoRoot, pIn);
+end
+
+function tf = is_absolute_path(p)
+if isempty(p)
+    tf = false;
+    return;
+end
+if ispc
+    tf = ~isempty(regexp(p, '^[A-Za-z]:[\\/]', 'once')) || startsWith(p, '\\');
+else
+    tf = startsWith(p, '/');
+end
+end
+
 function [trLabel, thetaDeg] = parse_run_tags(runName, runFolder)
 trLabel = runName;
 thetaDeg = NaN;
@@ -91,6 +107,7 @@ trToken = regexp(runName, 'tr\d+', 'match', 'once');
 if ~isempty(trToken)
     trLabel = trToken;
 end
+
 angToken = regexp(runName, 'ang\d+', 'match', 'once');
 if ~isempty(angToken)
     thetaDeg = str2double(angToken(4:end));
@@ -170,5 +187,33 @@ for i = 1:numel(vars)
         v = str2double(string(v));
     end
     tblOut.(name) = double(v);
+end
+end
+
+function [metrics, errorTable] = compute_basic_metrics(solid, shell)
+fields = {'U1','U2','U3','S_11','S_22','S_33','S_12','S_13','S_23','S_Mises'};
+
+metrics = struct();
+errorTable = table(double(solid.Label), double(solid.X), double(solid.Y), double(solid.Z), ...
+    'VariableNames', {'Label', 'X', 'Y', 'Z'});
+
+for i = 1:numel(fields)
+    name = fields{i};
+    if ~ismember(name, solid.Properties.VariableNames) || ~ismember(name, shell.Properties.VariableNames)
+        continue;
+    end
+    s = double(solid.(name));
+    sh = double(shell.(name));
+    d = sh - s;
+    mae = mean(abs(d), 'omitnan');
+    rVal = NaN;
+    if std(s) > 0 && std(sh) > 0
+        cc = corrcoef(s, sh);
+        if size(cc, 1) >= 2
+            rVal = cc(1, 2);
+        end
+    end
+    metrics.(name) = struct('MAE', mae, 'R', rVal);
+    errorTable.(sprintf('d_%s', name)) = d;
 end
 end
