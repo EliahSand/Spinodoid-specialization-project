@@ -1,0 +1,7 @@
+Run completed in 51.60 seconds.Step 1 complete: generated=6 failed=0 in 0.89 min.
+
+
+^^^ fra windows remote
+
+
+tror mac kjører på 28 sekund. 

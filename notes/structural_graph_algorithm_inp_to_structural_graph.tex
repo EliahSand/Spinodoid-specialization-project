@@ -1,0 +1,487 @@
+\documentclass[11pt]{article}
+\usepackage[a4paper,margin=1in]{geometry}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{array}
+\usepackage{booktabs}
+\usepackage{hyperref}
+
+\title{INP to Structural Graph: Exact Algorithm Walkthrough}
+\author{}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\section{Scope}
+This note explains exactly how the current code transforms an Abaqus \texttt{.inp} file into a structural graph.
+It is implementation-aligned with:
+\begin{itemize}
+  \item \texttt{Matlab/GNN/pipeline/step3\_batch\_structural\_graph\_from\_inp.m}
+  \item \texttt{Matlab/gnn\_prep\_spinodal/src/io/read\_abaqus\_inp.m}
+  \item \texttt{Matlab/gnn\_prep\_spinodal/src/mesh/select\_region\_elements.m}
+  \item \texttt{Matlab/gnn\_prep\_spinodal/src/graph/build\_full\_reference\_graph.m}
+  \item \texttt{Matlab/gnn\_prep\_spinodal/src/graph/extract\_structural\_graph.m}
+\end{itemize}
+
+No method comparison is included here. This is only a ``how it works'' specification.
+
+\section{Simple Explanation}
+\subsection*{Pipeline in plain language}
+\begin{enumerate}
+  \item Read \texttt{sheet\_shell.inp} and parse nodes, shell elements, and element sets.
+  \item Pick the target element region (usually the spinodal shell set).
+  \item Build a dense mesh graph:
+  \begin{itemize}
+    \item graph nodes = selected Abaqus nodes,
+    \item graph edges = unique shell edges from element connectivity,
+    \item boundary nodes = nodes on edges used by exactly one element.
+  \end{itemize}
+  \item Rasterize dense XY coordinates to a native grid mask.
+  \item Skeletonize each connected component with Zhang-Suen thinning.
+  \item Convert skeleton pixels back to a graph (skeleton graph).
+  \item Compress degree-2 chains into longer structural edges, controlled by \texttt{DetailLevel}.
+  \item Run a local cleanup pass:
+  \begin{itemize}
+    \item contract very short edges,
+    \item merge nearby high-degree junction pairs.
+  \end{itemize}
+  \item Attach thickness summaries to each structural edge using the full-node path.
+  \item Save one \texttt{sample.mat} per run with the final structural graph.
+\end{enumerate}
+
+\subsection*{Simple meaning of the main graphs}
+\begin{itemize}
+  \item Dense graph $G_d$: directly from selected shell mesh topology.
+  \item Skeleton graph $G_s$: one-node-thick centerline graph.
+  \item Structural graph $G_r$: reduced graph after chain compression and cleanup.
+\end{itemize}
+
+\section{Detailed Explanation}
+
+\subsection*{Notation}
+\[
+G_d = (V_d, E_d), \quad
+G_s = (V_s, E_s), \quad
+G_r = (V_r, E_r).
+\]
+Coordinates use physical XY taken from Abaqus node coordinates.
+
+\subsection*{Default parameters used by Step 3}
+In \texttt{step3\_batch\_structural\_graph\_from\_inp.m}, each run is processed with:
+\begin{itemize}
+  \item \texttt{ElsetName = 'SPINODAL\_SHELL'}
+  \item \texttt{AutoDetectElset = true}
+  \item \texttt{PatternPriority = \{'spinodal','top'\}}
+  \item \texttt{DetailLevel = 0.30}
+  \item \texttt{MinIslandNodes = 1}
+\end{itemize}
+
+\subsection*{1. Batch orchestration (\texttt{step3\_batch\_structural\_graph\_from\_inp.m})}
+\paragraph{Simple}
+The script finds run folders, skips already-processed runs, then parallelizes per-run graph extraction.
+
+\paragraph{Detailed}
+\begin{enumerate}
+  \item Recursively discover run folders under \texttt{Matlab/GNN/data/raw/samples}.
+  \item Keep folders that contain both \texttt{sheet.mat} and \texttt{mesh\_manifest.json}.
+  \item For each run:
+  \begin{itemize}
+    \item expect \texttt{sheet\_shell.inp},
+    \item skip if missing,
+    \item skip if output \texttt{sample.mat} already exists.
+  \end{itemize}
+  \item Start a parallel pool and process pending runs in \texttt{parfor}.
+  \item For each run: call parser, full-graph builder, structural extractor, then save \texttt{sample.mat}.
+\end{enumerate}
+
+\subsection*{2. INP parsing (\texttt{read\_abaqus\_inp.m})}
+\paragraph{Simple}
+The parser reads the text file block by block and extracts:
+nodes, elements, and elsets.
+
+\paragraph{Detailed}
+\begin{enumerate}
+  \item Read file line-by-line.
+  \item Ignore empty lines and Abaqus comment lines starting with \texttt{**}.
+  \item Detect keywords (\texttt{*NODE}, \texttt{*ELEMENT}, \texttt{*ELSET}) and parse attributes.
+  \item In \texttt{NODE} mode:
+  \begin{itemize}
+    \item parse CSV values,
+    \item first value is node label,
+    \item next values are coordinates (up to XYZ; missing values padded with 0).
+  \end{itemize}
+  \item In \texttt{ELEMENT} mode:
+  \begin{itemize}
+    \item first value is element label,
+    \item remaining values are node labels in element connectivity,
+    \item store element type from keyword attribute \texttt{TYPE=...}.
+  \end{itemize}
+  \item Handle long Abaqus connectivity continuation:
+  if a line starts with comma, append values to previous element connectivity.
+  \item In \texttt{ELSET} mode:
+  \begin{itemize}
+    \item parse element labels into the active elset,
+    \item if \texttt{GENERATE} is present, expand triples \((a,b,s)\) into sequence \(a:s:b\).
+  \end{itemize}
+  \item Deduplicate each elset label list with stable order.
+\end{enumerate}
+
+Output structure contains:
+\begin{itemize}
+  \item \texttt{node\_labels}, \texttt{node\_coords},
+  \item \texttt{element\_labels}, \texttt{element\_connectivity}, \texttt{element\_types},
+  \item \texttt{elset\_names}, \texttt{elset\_values}.
+\end{itemize}
+
+\subsection*{3. Region selection (\texttt{select\_region\_elements.m})}
+\paragraph{Simple}
+Pick which elements are ``in region'' before graph building.
+
+\paragraph{Detailed}
+\begin{enumerate}
+  \item If explicit \texttt{ElsetName} is given, use it exactly (case-insensitive).
+  \item Else if auto-detect is enabled, scan elset names in pattern order
+  (default: \texttt{spinodal} then \texttt{top}), and choose first match.
+  \item If no elset is selected, fall back to all elements.
+  \item Keep only selected elements that exist in \texttt{inpData.element\_labels}.
+  \item Build \texttt{region.node\_labels} as stable unique concatenation of selected element connectivity.
+\end{enumerate}
+
+\subsection*{4. Dense graph construction (\texttt{build\_full\_reference\_graph.m})}
+\paragraph{Simple}
+Convert selected shell elements into an undirected graph and mark boundary nodes.
+
+\paragraph{Detailed}
+\begin{enumerate}
+  \item Map selected Abaqus node labels to coordinates in \texttt{inpData.node\_coords}.
+  \item Convert each selected element connectivity from Abaqus labels to local node indices.
+  \item Extract shell edges per element:
+  for ordered element nodes \((n_1,\dots,n_k)\), create edges
+  \((n_1,n_2),(n_2,n_3),\dots,(n_k,n_1)\).
+  \item Sort each edge endpoint pair so edges are undirected.
+  \item Remove self edges \((i,i)\).
+  \item Concatenate all element edges into \texttt{all\_edges}.
+  \item Compute \texttt{unique\_edges} and \texttt{edge\_use\_count}.
+  \item Boundary rule:
+  edge is boundary iff its use count is exactly 1.
+  \item Boundary nodes are all nodes incident to at least one boundary edge.
+\end{enumerate}
+
+The dense graph contains:
+\begin{itemize}
+  \item \texttt{node\_coords}, \texttt{node\_labels},
+  \item \texttt{edges\_local}, \texttt{graph} (MATLAB graph object),
+  \item \texttt{boundary\_mask}, \texttt{boundary\_labels},
+  \item selected region element metadata.
+\end{itemize}
+
+\subsection*{5. Rasterization to native XY grid (\texttt{extract\_structural\_graph.m})}
+\paragraph{Simple}
+Map dense nodes onto a 2D occupancy grid so morphology and thinning can run.
+
+\paragraph{Detailed}
+\begin{enumerate}
+  \item Use only XY from \texttt{fullGraph.node\_coords(:,1:2)}.
+  \item Cluster X values and Y values independently with \texttt{cluster\_axis\_values}:
+  \begin{itemize}
+    \item sort values,
+    \item split groups when adjacent gap exceeds tolerance,
+    \item tolerance is based on smallest positive spacing and machine-level fallback,
+    \item use group means as grid axis values.
+  \end{itemize}
+  \item For each full node:
+  \begin{itemize}
+    \item get bin \((r,c)\),
+    \item write first node index into \texttt{nodeAt(r,c)}.
+  \end{itemize}
+  \item Define occupancy mask: \(\texttt{occMask} = (\texttt{nodeAt} > 0)\).
+  \item Build \texttt{componentAt} by projecting dense connected-component IDs from
+  \texttt{conncomp(fullGraph.graph)} onto grid cells.
+  \item Build \texttt{boundaryMask} on the grid from dense \texttt{boundary\_mask}.
+  \item Fallback: if no boundary seed was provided, detect geometric perimeter pixels
+  (4-neighbor exposure to outside).
+\end{enumerate}
+
+\subsection*{6. Boundary distance, radius, and thickness maps}
+\paragraph{Simple}
+Compute how far each occupied cell is from the boundary; convert this to local radius and thickness.
+
+\paragraph{Detailed}
+\begin{enumerate}
+  \item Compute \texttt{boundaryStepDistance} using multi-source BFS on occupied cells
+  (8-neighborhood, unit step count).
+  \item Compute physical radius map with weighted propagation:
+  \begin{itemize}
+    \item initialize boundary seeds with radius 0,
+    \item repeatedly expand to 8-neighbors inside occupancy,
+    \item edge cost is physical distance
+    \(\sqrt{(\Delta x)^2 + (\Delta y)^2}\) between grid coordinates.
+  \end{itemize}
+  \item Set thickness map on occupied cells:
+  \[
+  t(r,c) = 2\,r(r,c).
+  \]
+  \item Attach per-node values back to full-graph nodes using each node's \((xBin,yBin)\).
+\end{enumerate}
+
+Also store spacing statistics \texttt{dx}, \texttt{dy}, and \texttt{h} (medians of positive axis spacings).
+
+\subsection*{7. Skeletonization with Zhang-Suen and island enforcement}
+\paragraph{Simple}
+Each connected occupied component is thinned to a one-pixel centerline skeleton.
+
+\paragraph{Detailed}
+For each component mask:
+\begin{enumerate}
+  \item Apply Zhang-Suen thinning until convergence (no pixel deletions in both sub-iterations).
+  \item Pixel deletion conditions:
+  \[
+  2 \le N(p_1) \le 6, \quad S(p_1)=1,
+  \]
+  with standard two-pass logical constraints:
+  \[
+  \neg(p_2p_4p_6), \ \neg(p_4p_6p_8)
+  \]
+  in pass 1, and
+  \[
+  \neg(p_2p_4p_8), \ \neg(p_2p_6p_8)
+  \]
+  in pass 2.
+  \item Enforce minimum skeleton nodes per occupancy component:
+  if thinned skeleton count is below \texttt{MinIslandNodes}, force at least one representative pixel.
+  \item Representative pixel selection:
+  choose the component cell with maximum boundary-step distance
+  (or deterministic fallback if all distances are infinite).
+\end{enumerate}
+
+\subsection*{8. Skeleton graph construction (\texttt{build\_skeleton\_graph\_from\_mask})}
+\paragraph{Simple}
+Convert skeleton pixels to graph nodes and connect neighboring pixels.
+
+\paragraph{Detailed}
+\begin{enumerate}
+  \item Skeleton pixels become nodes; each stores:
+  \begin{itemize}
+    \item XY coordinates (from mapped full node),
+    \item full node label and full node index,
+    \item boundary step distance,
+    \item node radius and node thickness.
+  \end{itemize}
+  \item Build edges by scanning four directions
+  \((0,1),(1,-1),(1,0),(1,1)\) to avoid duplicate undirected insertion.
+  \item Add edge only when:
+  \begin{itemize}
+    \item both pixels are skeleton pixels,
+    \item both belong to the same connected component ID.
+  \end{itemize}
+  \item Additional diagonal rule:
+  a diagonal link is allowed only if at least one orthogonal corner-support
+  pixel belongs to the same component.
+  \item Edge length is Euclidean distance between endpoint XY coordinates.
+  \item Node role by skeleton degree:
+  \begin{itemize}
+    \item degree 0: \texttt{island}
+    \item degree 1: \texttt{endpoint}
+    \item degree 2: \texttt{chain}
+    \item degree $>2$: \texttt{junction}
+  \end{itemize}
+\end{enumerate}
+
+\subsection*{9. Skeleton to structural compression (\texttt{compress\_skeleton\_graph})}
+\paragraph{Simple}
+Trace paths through degree-2 chains and replace many small skeleton edges with fewer structural edges.
+
+\paragraph{Detailed}
+\begin{enumerate}
+  \item Build edge lookup table and visited flags for skeleton edges.
+  \item Process each skeleton connected component.
+  \item Define key nodes in a component:
+  \[
+  \{v : \deg(v)\neq 2\}.
+  \]
+  \item If component has no key nodes, it is a pure cycle:
+  trace a cycle path and process as closed path.
+  \item Otherwise, for each key node and each neighbor:
+  \begin{itemize}
+    \item if edge not visited, trace chain with \texttt{trace\_chain},
+    \item mark chain edges as visited,
+    \item process as open or closed path.
+  \end{itemize}
+  \item After that, process any unvisited edges (safety pass).
+\end{enumerate}
+
+\paragraph{Open-path anchor rule}
+For path length \(n\):
+\[
+m = n-2, \quad a = \min\big(m,\ \mathrm{round}(\texttt{DetailLevel}\cdot m)\big).
+\]
+Anchors are:
+\begin{itemize}
+  \item first node,
+  \item \(a\) internal evenly-spaced positions,
+  \item last node.
+\end{itemize}
+
+\paragraph{Closed-path anchor rule}
+For cycle size \(n\):
+\[
+k=\min\left(n,\ \max\left(3,\ 1+\mathrm{round}(\texttt{DetailLevel}(n-1))\right)\right).
+\]
+At least 3 anchors are kept for every cycle.
+
+\paragraph{Segment creation}
+Each consecutive anchor pair creates one structural edge storing:
+\begin{itemize}
+  \item endpoint indices in reduced graph,
+  \item \texttt{edge\_length} as polyline arc length,
+  \item \texttt{edge\_polyline} as ordered skeleton coordinates,
+  \item \texttt{edge\_full\_node\_paths} as ordered full-graph node indices,
+  \item component ID.
+\end{itemize}
+
+\paragraph{Reduced node bookkeeping}
+Reduced nodes are created lazily (\texttt{ensure\_reduced\_node}) and keep mappings:
+\begin{itemize}
+  \item structural node \(\rightarrow\) skeleton node index,
+  \item structural node \(\rightarrow\) full node index.
+\end{itemize}
+Role promotion uses precedence:
+\[
+\texttt{waypoint} < \texttt{island} < \texttt{endpoint} < \texttt{junction}.
+\]
+
+\paragraph{Duplicate open-path guard}
+If an open path would create a duplicate endpoint pair and has no internal anchor,
+the code forces a middle anchor to split that path and avoid immediate duplicate edge insertion.
+
+\subsection*{10. Structural cleanup (\texttt{cleanup\_structural\_graph})}
+\paragraph{Simple}
+After compression, run local merge rules to remove tiny artifacts.
+
+\paragraph{Detailed}
+\begin{enumerate}
+  \item Estimate characteristic spacing \(h\):
+  \begin{itemize}
+    \item median positive axis spacing from node coordinates, or
+    \item fallback median edge length.
+  \end{itemize}
+  \item Set cleanup thresholds:
+  \[
+  \ell_{\min}=1.5h,\quad r_{\text{merge}}=1.5h,\quad \text{maxIterations}=4.
+  \]
+  \item Initialize mutable cleanup state with:
+  node fields, edge fields, path fields, and membership sets.
+  \item Iterative pass (up to 4 rounds):
+  \begin{enumerate}
+    \item Repeated short-edge contractions:
+    find eligible edge shorter than \(\ell_{\min}\), merge its endpoint pair.
+    \item Repeated junction-cluster merges:
+    find nearest same-component pair of degree \(>2\) nodes within \(r_{\text{merge}}\), merge.
+  \end{enumerate}
+  \item Stop early if an iteration makes no changes.
+\end{enumerate}
+
+\paragraph{Short-edge candidate eligibility}
+For edge \((u,v)\), code skips candidates where:
+\begin{itemize}
+  \item \(u=v\),
+  \item \(\deg(u)=1\) or \(\deg(v)=1\).
+\end{itemize}
+Candidate is accepted when:
+\begin{itemize}
+  \item \(\deg(u)\neq 2\) or \(\deg(v)\neq 2\), or
+  \item \(u,v\) share a common neighbor.
+\end{itemize}
+
+\paragraph{Node merge mechanics}
+When merging a node group:
+\begin{enumerate}
+  \item Choose representative node by:
+  \begin{enumerate}
+    \item highest degree,
+    \item then highest thickness proxy,
+    \item then smallest total XY distance to other candidates (medoid).
+  \end{enumerate}
+  \item Union membership metadata:
+  merged full-node indices, merged skeleton-node indices, merged original structural indices.
+  \item Rewire all incident edges from removed nodes to representative.
+  \item Update edge polyline endpoints to representative coordinates.
+  \item Compact state:
+  remap node indices, remove deleted nodes, remove invalid edges, remove self loops.
+  \item Deduplicate parallel edges by undirected pair and keep the longest.
+\end{enumerate}
+
+\paragraph{Cleanup outputs}
+The final graph stores:
+\begin{itemize}
+  \item merged-membership arrays for traceability,
+  \item updated node table columns (FullNodeIndex, SkeletonNodeIndex, Radius, Thickness, NodeRole, merged sets),
+  \item \texttt{cleanup\_info} with thresholds and merge counters.
+\end{itemize}
+
+\subsection*{11. Structural edge thickness summaries}
+\paragraph{Simple}
+Each structural edge gets thickness statistics sampled along its stored full-node path.
+
+\paragraph{Detailed}
+For each structural edge path \(P_e\):
+\[
+t_{\min}(e)=\min_{i\in P_e} t_i,\quad
+t_{\text{mean}}(e)=\frac{1}{|P_e|}\sum_{i\in P_e} t_i,\quad
+t_{\max}(e)=\max_{i\in P_e} t_i.
+\]
+Then:
+\[
+t_{\text{bottleneck}}(e)=t_{\min}(e),\quad
+\Delta t(e)=t_{\max}(e)-t_{\min}(e).
+\]
+
+These are written into:
+\begin{itemize}
+  \item \texttt{edge\_thickness\_min}
+  \item \texttt{edge\_thickness\_mean}
+  \item \texttt{edge\_thickness\_max}
+  \item \texttt{edge\_thickness\_bottleneck}
+  \item \texttt{edge\_thickness\_delta}
+\end{itemize}
+
+\subsection*{12. Persisted output structure (\texttt{sample.mat})}
+\paragraph{Simple}
+Each run produces one \texttt{sample.mat} with final graph and summary metadata.
+
+\paragraph{Detailed}
+\texttt{sample.mat} contains:
+\begin{itemize}
+  \item \texttt{sample.id}: run name
+  \item \texttt{sample.source.inp\_path}: source INP path
+  \item \texttt{sample.graph}: structural graph (after cleanup and thickness attachment)
+  \item \texttt{sample.graph\_info}:
+  \begin{itemize}
+    \item mode and extraction parameters,
+    \item node/edge counts for full, skeleton, and structural graphs.
+  \end{itemize}
+\end{itemize}
+
+\section{Compact End-to-End Pseudocode}
+\begin{verbatim}
+for each run folder:
+    inp = read_abaqus_inp(sheet_shell.inp)
+    region = select_region_elements(inp, elset/pattern options)
+    full = build_full_reference_graph(region)
+
+    grid = rasterize(full.node_coords, full.boundary_mask, full.components)
+    maps = compute_boundary_distance_and_thickness(grid)
+    full = attach_full_graph_thickness(full, maps)
+
+    skel_mask = thinning_per_component(grid.occMask, MinIslandNodes)
+    skel = build_skeleton_graph_from_mask(skel_mask, full, maps)
+
+    struct = compress_skeleton_graph(skel, DetailLevel)
+    struct = cleanup_structural_graph(struct, skel)
+    struct = attach_structural_edge_thickness(struct, full)
+
+    save sample.mat with struct graph and graph_info
+\end{verbatim}
+
+\end{document}
