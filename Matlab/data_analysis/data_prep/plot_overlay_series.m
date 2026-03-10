@@ -1,5 +1,5 @@
 function plot_overlay_series(overlayData, outDir)
-%PLOT_OVERLAY_SERIES Create overlay scatter plots for U1, U2, U3 per thickness ratio.
+%PLOT_OVERLAY_SERIES Create overlay scatter plots for all fields in overlayData.
 
 arguments
     overlayData struct
@@ -29,12 +29,22 @@ for fIdx = 1:numel(fields)
             solidVals = data.solid{k};
             shellVals = data.shell{k};
             cIdx = mod(k-1, size(colorMap, 1)) + 1;
+            if isnan(data.thetaDeg(k))
+                thetaText = '\theta = N/A';
+            else
+                thetaText = sprintf('\\theta = %d°', round(data.thetaDeg(k)));
+            end
             scatter(ax, solidVals, shellVals, 18, colorMap(cIdx, :), 'filled', ...
-                'DisplayName', sprintf('\\theta = %d°', data.thetaDeg(k)), ...
+                'DisplayName', thetaText, ...
                 'MarkerFaceAlpha', 0.8, 'MarkerEdgeColor', colorMap(cIdx, :)*0.6, ...
                 'MarkerEdgeAlpha', 0.9);
         end
         allVals = cell2mat([data.solid, data.shell].');
+        allVals = allVals(isfinite(allVals));
+        if isempty(allVals)
+            close(fig);
+            continue;
+        end
         lims = [min(allVals, [], 'omitnan'), max(allVals, [], 'omitnan')];
         if diff(lims) == 0
             lims = lims + [-1, 1];

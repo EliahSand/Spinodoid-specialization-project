@@ -7,3 +7,6 @@ master-main*
 
 Matlab/gnn_prep_spinodal/out*
 .DS_Store
+Matlab/GNN/data/raw*
+Matlab/GNN/data/dataset*
+Matlab/GNN/data/processed*

@@ -62,6 +62,21 @@ Minimal example script:
 run('Matlab/gnn_prep_spinodal/examples/example_build_graphs.m')
 ```
 
+INP-only (pre-deformation) quick test:
+
+```matlab
+run_main_spinodal_gnn_prep_from_inp
+```
+
+INP-only direct function call:
+
+```matlab
+outputs = main_spinodal_gnn_prep_from_inp(inpPath, ...
+    'ElsetName', 'SPINODAL_SHELL', ...
+    'StructuralDetailLevel', 0.20, ...
+    'OutDir', 'Matlab/gnn_prep_spinodal/out');
+```
+
 ## Main Output
 
 - `full_graph_*`: full reference graph export
@@ -185,3 +200,9 @@ Useful options for clearer plots:
 'PlotXLabel', 'x [mm]', ...
 'PlotYLabel', 'y [mm]'
 ```
+
+## Method Note
+
+Detailed algorithm notes (dense -> skeleton -> structural, Zhang-Suen thinning, detail level, cleanup, thickness propagation):
+
+- `notes/structural_graph_algorithm_README.md`

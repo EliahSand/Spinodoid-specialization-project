@@ -1,7 +1,7 @@
 % PSSCone - Spinodal two-layered sheet generator with controllable in-plane
 % lamellar angle and tiling
 
-function PSSCone(params)
+function PSSConeOG(params)
 tStart = tic;
 
 
@@ -21,14 +21,17 @@ cfg.lambda_vox   = 25;          % target feature wavelength in voxels (~rib/liga
 cfg.bandwidth    = 2;           % relative shell thickness around target |k| (0.1–0.3)
 cfg.nModes       = 4000;        % number of Fourier modes to sample (1k–10k typical)
 cfg.solid_frac   = 0.50;        % volume fraction of SOLID after threshold (0..1)
-cfg.coneDeg      = [30 0 0];    % cone half-angles about x,y,z [30 0 0] = lamellar 
-cfg.rngSeed      = 1;           % reproducible
+cfg.coneDeg      = [30 0 0];    % cone half-angles about x,y,z (90= isotropic). e.g. [90 90 90]
+cfg.rngSeed      = 3;           % reproducible
+cfg.sigma_vox    = 0.0;
 cfg.remove_top_spin_frac = 0.0;   % fraction of spinodal voxels to stochastically remove in the spinodoid layer
 
 cfg.t_spin       = 1e-3;        %spinodal thickness         (vanligvis 1e-3)
 cfg.t_base       = 2e-3;        %base thickness             (vanligvis 2e-3)
 cfg.tilesXY      = [1 1];       %tiling for periodicity
+cfg.add_outer_skin_vox = 0;
 cfg.slice_count  = 8;           %builds 2D spinodal patterm for shell by averaging top "slice_count" for 3D field, then majority thresholding
+cfg.align_with_cube = true;
 cfg.lamellarAngleDeg = 0;       %lamellar angle to x-axis
 cfg.resultsRoot  = [];
 
@@ -64,6 +67,12 @@ coneBasis = [cos(theta) -sin(theta) 0; ...
              sin(theta)  cos(theta) 0; ...
              0           0          1];
 [phi, meta] = spinodal_periodic_field(cfg.N, cfg.L, cfg.lambda_vox, cfg.bandwidth, cfg.nModes, cfg.coneDeg, coneBasis);
+
+if cfg.sigma_vox > 0
+    phi = periodic_gaussian_blur(phi, cfg.sigma_vox);
+    phi = phi - mean(phi(:));
+    phi = phi ./ (std(phi(:)) + eps);
+end
 
 Svox = cfg.L / cfg.N;
 tsV  = max(1, round(cfg.t_spin / Svox));
@@ -116,10 +125,22 @@ sheetMask = cat(3, baseLayer, spinLayer);
 tx = cfg.tilesXY(1); ty = cfg.tilesXY(2);
 sheetMask = repmat(sheetMask, tx, ty, 1);
 
-% Keep one fixed axis convention for all exports/pipeline steps.
-sheetMask = permute(sheetMask, [2 1 3]);
-Lx = cfg.L * ty;
-Ly = cfg.L * tx;
+if cfg.add_outer_skin_vox > 0
+    s = min(cfg.add_outer_skin_vox, floor(size(sheetMask,1)/8));
+    sheetMask(1:s,:,:)                 = true;
+    sheetMask(end-s+1:end,:,:)         = true;
+    sheetMask(:,1:s,:)                 = true;
+    sheetMask(:,end-s+1:end,:)         = true;
+end
+
+if cfg.align_with_cube
+    sheetMask = permute(sheetMask, [2 1 3]);
+    Lx = cfg.L * ty;
+    Ly = cfg.L * tx;
+else
+    Lx = cfg.L * tx;
+    Ly = cfg.L * ty;
+end
 
 solidFractionBase      = mean(baseLayer(:));
 solidFractionSpinLayer = mean(spinLayer(:));
@@ -163,12 +184,45 @@ if ~exist(typeRoot, 'dir'), mkdir(typeRoot); end
 runDir = unique_run_dir(typeRoot, runLabelBase);
 [~, runFolderName] = fileparts(runDir);
 
+stlPath = unique_path(fullfile(runDir, 'sheet.stl'));
+[~, stlFileName, ext] = fileparts(stlPath);
+stlFileName = [stlFileName ext];
+
+sheetMaskPad = cat(1, false(1,size(sheetMask,2),size(sheetMask,3)), sheetMask, false(1,size(sheetMask,2),size(sheetMask,3)));
+sheetMaskPad = cat(2, false(size(sheetMaskPad,1),1,size(sheetMaskPad,3)), sheetMaskPad, false(size(sheetMaskPad,1),1,size(sheetMaskPad,3)));
+sheetMaskPad = cat(3, false(size(sheetMaskPad,1),size(sheetMaskPad,2),1), sheetMaskPad, false(size(sheetMaskPad,1),size(sheetMaskPad,2),1));
+
+NxTot = size(sheetMask,1);
+NyTot = size(sheetMask,2);
 dx = cfg.L / cfg.N;
+dy = dx;
+
 dz_base = cfg.t_base / tbV;
 dz_spin = cfg.t_spin / tsV;
+zCore = [ (0:tbV-1)*dz_base + dz_base/2 , ...
+          tbV*dz_base + (0:tsV-1)*dz_spin + dz_spin/2 ];
 
-matPath = fullfile(runDir, 'sheet.mat');
-[~, matBase] = fileparts(matPath);
+xCenters = ((0:NxTot-1) + 0.5) * dx;
+yCenters = ((0:NyTot-1) + 0.5) * dy;
+
+xCentersPad = [xCenters(1)-dx, xCenters, xCenters(end)+dx];
+yCentersPad = [yCenters(1)-dy, yCenters, yCenters(end)+dy];
+zCentersPad = [zCore(1)-dz_base, zCore, zCore(end)+dz_spin];
+
+[X,Y,Z] = ndgrid(xCentersPad, yCentersPad, zCentersPad);
+fv = isosurface(X, Y, Z, double(sheetMaskPad), 0.5);
+if isempty(fv.vertices)
+    error('Empty surface: adjust parameters to avoid trivial mask.');
+end
+
+meshStats.numFaces = size(fv.faces,1);
+meshStats.numVertices = size(fv.vertices,1);
+
+stlwrite_ascii(stlPath, fv.vertices, double(fv.faces));
+fprintf('Wrote STL: %s\n', stlPath);
+
+[matDir, matBase] = fileparts(stlPath);
+matPath = fullfile(matDir, sprintf('%s.mat', matBase));
 voxelSizeXY = dx;
 zVoxelThickness = [repmat(dz_base, 1, tbV), repmat(dz_spin, 1, tsV)];
 save(matPath, 'sheetMask', 'voxelSizeXY', 'zVoxelThickness', '-v7.3');
@@ -207,6 +261,7 @@ paramLines = {
     sprintf('  nModes: %d', cfg.nModes)
     sprintf('  solid_frac_target: %.3f', cfg.solid_frac)
     sprintf('  coneDeg: [%s]', num2str(cfg.coneDeg))
+    sprintf('  sigma_vox: %.3f', cfg.sigma_vox)
     sprintf('  slice_count: %d', cfg.slice_count)
     sprintf('  lamellar_angle_deg: %.1f', cfg.lamellarAngleDeg)
     sprintf('  rng_seed: %d', cfg.rngSeed)
@@ -217,6 +272,7 @@ sheetLines = {
     sprintf('  t_spin_mm: %.4f', cfg.t_spin*1e3)
     sprintf('  t_base_mm: %.4f', cfg.t_base*1e3)
     sprintf('  tsV/tbV/Nz (vox): %d / %d / %d', tsV, tbV, Nz)
+    sprintf('  outer_skin_vox: %d', cfg.add_outer_skin_vox)
     sprintf('  dims_mm: [%.3f %.3f %.3f]', Lx*1e3, Ly*1e3, Lz*1e3)
     sprintf('  pattern_frac_2d: %.3f', solidFractionPattern)
     sprintf('  solid_frac spin/base/sheet: %.3f / %.3f / %.3f', ...
@@ -231,7 +287,9 @@ logLines = [
     sprintf('Generated: %s', timestampStr)
     sprintf('Folder: %s', runFolderName)
     sprintf('Type: %s (periodic XY)', spinodalType)
-    sprintf('Mask MAT: %s.mat', matBase)
+    sprintf('STL: %s', stlFileName)
+    sprintf('Faces: %d', meshStats.numFaces)
+    sprintf('Vertices: %d', meshStats.numVertices)
     ''
     'Base cell parameters:'
     } ;
@@ -267,7 +325,8 @@ fprintf('Grid: %d^3, lambda_vox: %.3f, bandwidth: %.3f\n', cfg.N, cfg.lambda_vox
 fprintf('Lamellar angle: %.1f deg\n', cfg.lamellarAngleDeg);
 fprintf('Solid fraction (target / pattern / sheet): %.3f / %.3f / %.3f\n', ...
         cfg.solid_frac, solidFractionPattern, solidFractionSheet);
-fprintf('Tiles: %dx%d, Mask MAT: %s\n', tx, ty, matPath);
+fprintf('Tiles: %dx%d, STL: %s\n', tx, ty, stlPath);
+fprintf('Faces: %d, Vertices: %d\n', meshStats.numFaces, meshStats.numVertices);
 fprintf('----------------------\n\n');
 if elapsedSeconds < 60
     fprintf('Run completed in %.2f seconds.\n', elapsedSeconds);
