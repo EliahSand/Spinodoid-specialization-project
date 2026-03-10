@@ -21,7 +21,7 @@ cfg.lambda_vox   = 25;          % target feature wavelength in voxels (~rib/liga
 cfg.bandwidth    = 2;           % relative shell thickness around target |k| (0.1–0.3)
 cfg.nModes       = 4000;        % number of Fourier modes to sample (1k–10k typical)
 cfg.solid_frac   = 0.50;        % volume fraction of SOLID after threshold (0..1)
-cfg.coneDeg      = [30 0 0];    % cone half-angles about x,y,z (90= isotropic). e.g. [90 90 90]
+cfg.coneDeg      = [30 0 0];    % cone half-angles about x,y,z [30 0 0] = lamellar 
 cfg.rngSeed      = 1;           % reproducible
 cfg.remove_top_spin_frac = 0.0;   % fraction of spinodal voxels to stochastically remove in the spinodoid layer
 
