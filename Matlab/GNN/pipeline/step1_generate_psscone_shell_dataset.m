@@ -13,11 +13,11 @@ repoRoot = fileparts(fileparts(gnnRoot));
 addpath(fullfile(repoRoot, 'Matlab'));
 
 % ---------------- Configuration ----------------
-numSamples = 6;
-%anglesDeg = 0:90;
-anglesDeg = [0 30 60 90];
-%ratios = [0.5, 1.0, 2.0];
-ratios = [1.0];
+numSamples = 6000;
+anglesDeg = 0:90;
+%anglesDeg = [0 30 60 90];
+ratios = [0.5, 1.0, 2.0];
+%ratios = [1.0];
 
 baseThickness = 2e-3;                 % m
 outRoot = fullfile(gnnRoot, 'data', 'raw', 'samples');

@@ -1,0 +1,10 @@
+Step 1 complete: generated=6000 failed=0 in 280.99 min.
+
+step 2: 4 min ish
+
+step 3: 2.3 timer ish (matlab kræsja)
+Step 3 (INP-only) complete: ok=1175 skip=4825 fail=0 (26.77 min)
+
+
+
+step 4:

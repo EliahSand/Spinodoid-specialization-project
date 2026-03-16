@@ -99,6 +99,8 @@ fullGraph = build_full_reference_graph(inpData, ...
     'DetailLevel', 0.30, ...
     'MinIslandNodes', 1);
 
+[ratioVal, ratioLog2, ratioLabel] = parse_spin_base_ratio(runName);
+
 sampleDir = fullfile(datasetRoot, runName);
 ensure_dir(sampleDir);
 
@@ -113,6 +115,9 @@ sample.graph_info = struct( ...
     'mode', 'structural_graph_predeformation', ...
     'detail_level', 0.30, ...
     'min_island_nodes', 1, ...
+    'spin_base_ratio', ratioVal, ...
+    'spin_base_ratio_log2', ratioLog2, ...
+    'spin_base_ratio_label', ratioLabel, ...
     'full_nodes', fullGraph.num_nodes, ...
     'full_edges', size(fullGraph.edges_local, 1), ...
     'skeleton_nodes', skeletonGraph.num_nodes, ...
@@ -127,6 +132,28 @@ function ensure_dir(pathStr)
 if ~isfolder(pathStr)
     mkdir(pathStr);
 end
+end
+
+function [ratioVal, ratioLog2, ratioLabel] = parse_spin_base_ratio(runName)
+ratioVal = NaN;
+ratioLog2 = NaN;
+ratioLabel = '';
+
+tok = regexp(lower(runName), 'tr(\d+)', 'tokens', 'once');
+if isempty(tok)
+    return;
+end
+
+ratioDigits = str2double(tok{1});
+if ~isfinite(ratioDigits)
+    return;
+end
+
+ratioVal = ratioDigits / 100;
+if ratioVal > 0
+    ratioLog2 = log2(ratioVal);
+end
+ratioLabel = sprintf('tr%02d', round(ratioDigits));
 end
 
 function out = find_run_dirs(rootDir)
