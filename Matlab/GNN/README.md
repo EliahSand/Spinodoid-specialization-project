@@ -37,8 +37,6 @@ Matlab/GNN/data/
   `data/dataset/samples/<run_name>/sample.mat` (contains structural graph).
 - `step4_run_abaqus_shell.py` computes and stores midpoint curvature target (`kappa_circle_1_per_m`) in:
   `data/dataset/samples/<run_name>/target_midpoint_curvature.json`.
-- Step 4 also writes the same target metrics as one-row CSV:
-  `data/dataset/samples/<run_name>/target_midpoint_curvature.csv`.
 - Step 4 moves `FEA_shell/midplane_results_shell.csv` into:
   `data/dataset/samples/<run_name>/midpoint_results_shell.csv`.
 - Step 4 does not duplicate graph CSV files.

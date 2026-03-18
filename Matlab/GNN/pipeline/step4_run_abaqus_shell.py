@@ -9,7 +9,6 @@ How to run:
 Writes:
   Matlab/GNN/data/dataset/samples/<run_name>/midpoint_results_shell.csv
   Matlab/GNN/data/dataset/samples/<run_name>/target_midpoint_curvature.json
-  Matlab/GNN/data/dataset/samples/<run_name>/target_midpoint_curvature.csv
   Matlab/GNN/data/dataset/samples/<run_name>/meta.json
 """
 
@@ -280,31 +279,6 @@ def compute_midpoint_curvature(csv_path):
     return out
 
 
-def write_curvature_csv(curvature_dict, out_path):
-    if PY2:
-        fh = open(out_path, "wb")
-    else:
-        fh = open(out_path, "w", newline="", encoding="utf-8")
-    try:
-        writer = csv.writer(fh)
-        headers = [
-            "n_points",
-            "kappa_circle_1_per_m",
-            "radius_circle_m",
-            "circle_center_y_m",
-            "circle_center_z_m",
-            "circle_fit_rmse_m",
-            "kappa_sagitta_1_per_m",
-            "radius_sagitta_m",
-            "delta_sagitta_m",
-            "chord_length_m",
-        ]
-        writer.writerow(headers)
-        writer.writerow([curvature_dict.get(k) for k in headers])
-    finally:
-        fh.close()
-
-
 def package_processed_sample(run_name, csv_path, dataset_root, dry_run):
     sample_dir = os.path.join(dataset_root, run_name)
     midpoint_dst = os.path.join(sample_dir, "midpoint_results_shell.csv")
@@ -317,7 +291,6 @@ def package_processed_sample(run_name, csv_path, dataset_root, dry_run):
 
     curvature = compute_midpoint_curvature(src_csv)
     target_dst = os.path.join(sample_dir, "target_midpoint_curvature.json")
-    target_csv_dst = os.path.join(sample_dir, "target_midpoint_curvature.csv")
     meta_dst = os.path.join(sample_dir, "meta.json")
     sample_mat_path = os.path.join(sample_dir, "sample.mat")
     sample_mat_exists = os.path.isfile(sample_mat_path)
@@ -332,10 +305,10 @@ def package_processed_sample(run_name, csv_path, dataset_root, dry_run):
             _safe_remove(midpoint_dst)
         move(src_csv, midpoint_dst)
     src_csv = midpoint_dst
+    _safe_remove(os.path.join(sample_dir, "target_midpoint_curvature.csv"))
 
     with open(target_dst, "w") as fh:
         json.dump(curvature, fh, indent=2)
-    write_curvature_csv(curvature, target_csv_dst)
     with open(meta_dst, "w") as fh:
         json.dump({
             "run_name": run_name,
@@ -345,7 +318,6 @@ def package_processed_sample(run_name, csv_path, dataset_root, dry_run):
             "sample_mat_exists": sample_mat_exists,
             "target_name": "kappa_circle_1_per_m",
             "target_curvature_json": target_dst,
-            "target_curvature_csv": target_csv_dst,
         }, fh, indent=2)
     return True, "ok"
 
