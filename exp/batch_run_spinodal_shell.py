@@ -13,6 +13,12 @@ import os
 import subprocess
 import time
 
+HEAVY_EXTS = set([
+    '.odb', '.cae', '.sim', '.prt', '.res', '.stt',
+    '.msg', '.dat', '.com', '.log', '.lck', '.sta', '.jnl',
+])
+
+
 def parse_args():
     p = argparse.ArgumentParser(description='Batch run shell spinodal simulations.')
     p.add_argument('--roots', nargs='+', default=['Matlab/results'],
@@ -55,6 +61,54 @@ def existing_odb_path(inp_path):
     return os.path.join(fea_dir, job_name + '.odb')
 
 
+def expected_midplane_csv_path(inp_path):
+    fea_dir = os.path.join(os.path.dirname(inp_path), 'FEA_shell')
+    return os.path.join(fea_dir, 'midplane_results_shell.csv')
+
+
+def _safe_remove(path):
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
+def cleanup_fea_shell_dir(fea_shell_dir, dry_run):
+    if not os.path.isdir(fea_shell_dir):
+        return 0
+    removed = 0
+    for name in os.listdir(fea_shell_dir):
+        path = os.path.join(fea_shell_dir, name)
+        if os.path.isfile(path):
+            ext = os.path.splitext(name)[1].lower()
+            remove_file = ext in HEAVY_EXTS
+            if ext == '.inp' and name.lower().endswith('_job.inp'):
+                remove_file = True
+            if remove_file:
+                if not dry_run:
+                    _safe_remove(path)
+                removed += 1
+        elif os.path.isdir(path) and name.lower().endswith('.simdir'):
+            if dry_run:
+                removed += 1
+            else:
+                for root, dirs, files in os.walk(path, topdown=False):
+                    for fn in files:
+                        _safe_remove(os.path.join(root, fn))
+                    for dn in dirs:
+                        dpath = os.path.join(root, dn)
+                        try:
+                            os.rmdir(dpath)
+                        except OSError:
+                            pass
+                try:
+                    os.rmdir(path)
+                except OSError:
+                    pass
+                removed += 1
+    return removed
+
+
 def main():
     args = parse_args()
     manifests = find_manifests(args.roots)
@@ -63,6 +117,9 @@ def main():
         return
 
     batch_start = time.time()
+    cleaned_runs = 0
+    removed_items = 0
+    cleanup_skips = 0
 
     for manifest_path in manifests:
         try:
@@ -81,8 +138,14 @@ def main():
             continue
 
         odb_path = existing_odb_path(inp_path)
-        if os.path.isfile(odb_path) and not args.overwrite:
-            print('[SKIP] %s: ODB exists (%s). Use --overwrite to rerun.' % (inp_path, odb_path))
+        mid_csv_path = expected_midplane_csv_path(inp_path)
+        marker_path = None
+        if os.path.isfile(mid_csv_path):
+            marker_path = mid_csv_path
+        elif os.path.isfile(odb_path):
+            marker_path = odb_path
+        if marker_path is not None and not args.overwrite:
+            print('[SKIP] %s: result exists (%s). Use --overwrite to rerun.' % (inp_path, marker_path))
             continue
 
         cmd = '"%s" cae noGUI="%s" -- "%s"' % (args.abaqus_cmd, args.script, inp_path)
@@ -96,9 +159,20 @@ def main():
             print('[FAIL] %s (exit %s, %.1fs)' % (inp_path, ret, dt))
         else:
             print('[DONE] %s (%.1fs)' % (inp_path, dt))
+            fea_shell_dir = os.path.dirname(mid_csv_path)
+            if not os.path.isfile(mid_csv_path):
+                cleanup_skips += 1
+                print('[WARN] %s: midplane_results_shell.csv not found; keeping Abaqus artifacts.' % inp_path)
+            else:
+                n = cleanup_fea_shell_dir(fea_shell_dir, dry_run=False)
+                cleaned_runs += 1
+                removed_items += n
+                print('[CLEAN] %s: removed %d item(s).' % (fea_shell_dir, n))
 
     batch_dt = time.time() - batch_start
     print('Batch complete in %.1f seconds (%.2f minutes)' % (batch_dt, batch_dt / 60.0))
+    print('Immediate cleanup: cleaned %d run(s), removed %d item(s), skipped %d run(s).' %
+          (cleaned_runs, removed_items, cleanup_skips))
 
 
 if __name__ == '__main__':

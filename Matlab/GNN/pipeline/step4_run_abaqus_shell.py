@@ -378,27 +378,22 @@ def resolve_repo_root(script_path):
     )
 
 
-def _load_batch_module(batch_script_path):
-    if PY2:
-        import imp
-        return imp.load_source("batch_run_spinodal_shell", batch_script_path)
-
-    import importlib.machinery
-    loader = importlib.machinery.SourceFileLoader("batch_run_spinodal_shell", batch_script_path)
-    return loader.load_module()
-
-
 def run_batch_shell(batch_script_path, roots, abaqus_cmd, dry_run):
-    mod = _load_batch_module(batch_script_path)
-    if not hasattr(mod, "main"):
-        raise RuntimeError("batch_run_spinodal_shell.py has no main()")
-
     argv_backup = list(sys.argv)
     try:
         sys.argv = [batch_script_path, "--roots", roots, "--abaqus-cmd", abaqus_cmd]
         if dry_run:
             sys.argv.append("--dry-run")
-        mod.main()
+        namespace = {
+            "__name__": "__main__",
+            "__file__": batch_script_path,
+        }
+        if PY2:
+            execfile(batch_script_path, namespace)
+        else:
+            with open(batch_script_path, "rb") as fh:
+                code = compile(fh.read(), batch_script_path, "exec")
+            exec(code, namespace)
     finally:
         sys.argv = argv_backup
 
@@ -418,7 +413,7 @@ def main():
         % (
             DEFAULT_ABAQUS_CMD,
             script,
-            DEFAULT_SAMPLES_ROOT,
+            samples_root,
             DEFAULT_ABAQUS_CMD,
             " --dry-run" if args.dry_run else "",
         )
@@ -426,7 +421,7 @@ def main():
     if not args.package_only:
         run_batch_shell(
             batch_script_path=script,
-            roots=DEFAULT_SAMPLES_ROOT,
+            roots=samples_root,
             abaqus_cmd=DEFAULT_ABAQUS_CMD,
             dry_run=args.dry_run,
         )
@@ -468,8 +463,12 @@ def main():
     )
 
     final_time = time.time() - batch_time
-    print('Batch complete in %.1f seconds and %.2f minutes' % (batch_time, batch_time/60))
+    print('Batch complete in %.1f seconds and %.2f minutes' % (final_time, final_time / 60.0))
 
 
-if __name__ == "__main__":
+# This wrapper is only used as an entry script. Abaqus/CAE noGUI executes it
+# via execfile(..., __main__.__dict__), so rely on a one-shot sentinel rather
+# than fragile __name__ / argv detection.
+if not globals().get("_STEP4_RUN_ABAQUS_SHELL_ALREADY_EXECUTED", False):
+    globals()["_STEP4_RUN_ABAQUS_SHELL_ALREADY_EXECUTED"] = True
     main()
