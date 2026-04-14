@@ -7,4 +7,32 @@ Step 3 (INP-only) complete: ok=1175 skip=4825 fail=0 (26.77 min)
 
 
 
-step 4:
+step 4: startet 08:04 - vi får se hvor lenge det varer
+
+abaqus.rpy.1917
+
+abaqus.rpy.3418
+
+
+abaqus.rpy.5545:
+#: Batch complete in 53424.3 seconds (890.41 minutes)
+#: Immediate cleanup: cleaned 2126 run(s), removed 21260 item(s), skipped 0 run(s).
+#: Post-run cleanup: cleaned 499 run(s), removed 4624 item(s).
+#: Dataset packaging: packaged=5998, skipped=0, output_root=C:\Users\eliahms\OneDrive - NTNU\Master 2026\Spinodoid-specialization-project\Matlab\GNN\data\dataset\samples
+#: Batch complete in 53612.0 seconds and 893.53 minutes
+print 'RT script done'
+#: RT script done
+
+abaqus.rpy.3894
+
+
+From your saved logs, the total compute time is about 20 hours (or about 22 hours if we include the crashed Step 3 attempt).
+
+Step 1: 280.99 min
+Step 2: ~4 min
+Step 3: 26.77 min (plus an earlier failed run noted as ~2.3 hours)
+Step 4: 893.53 min (abaqus.rpy.5545)
+So:
+
+Without failed Step 3 attempt: 1205.29 min = 20h 5m
+Including the failed Step 3 attempt: ~1316.5 min = 21h 57m
