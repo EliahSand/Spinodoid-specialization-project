@@ -10,3 +10,7 @@ Matlab/gnn_prep_spinodal/out*
 Matlab/GNN/data/raw*
 Matlab/GNN/data/dataset*
 Matlab/GNN/data/processed*
+
+exp/__pycache__*
+
+CLAUDE.md

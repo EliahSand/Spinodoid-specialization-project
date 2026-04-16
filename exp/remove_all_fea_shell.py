@@ -2,9 +2,9 @@
 """Remove all FEA_shell directories under the GNN raw samples tree.
 
 Usage:
-  python3 Matlab/GNN/pipeline/remove_all_fea_shell.py
-  python3 Matlab/GNN/pipeline/remove_all_fea_shell.py --dry-run
-  python3 Matlab/GNN/pipeline/remove_all_fea_shell.py --root Matlab/GNN/data/raw/samples
+  python3 exp/remove_all_fea_shell.py
+  python3 exp/remove_all_fea_shell.py --dry-run
+  python3 exp/remove_all_fea_shell.py --root Matlab/GNN/data/raw/samples
 """
 
 from __future__ import annotations
