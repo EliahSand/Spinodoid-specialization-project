@@ -14,8 +14,10 @@ scriptPath = mfilename('fullpath');
 scriptDir = fileparts(scriptPath);
 gnnRoot = fileparts(scriptDir);
 repoRoot = fileparts(fileparts(gnnRoot));
+helpersDir = fullfile(gnnRoot, 'helpers');
 
 addpath(scriptDir);
+addpath(helpersDir);
 
 samplesRoot = fullfile(gnnRoot, 'data', 'raw', 'samples');
 datasetRoot = fullfile(gnnRoot, 'data', 'dataset', 'samples');

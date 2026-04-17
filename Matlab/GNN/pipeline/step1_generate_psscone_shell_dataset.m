@@ -9,8 +9,10 @@ scriptPath = mfilename('fullpath');
 scriptDir = fileparts(scriptPath);
 gnnRoot = fileparts(scriptDir);
 repoRoot = fileparts(fileparts(gnnRoot));
+helpersDir = fullfile(gnnRoot, 'helpers');
 
 addpath(scriptDir);
+addpath(helpersDir);
 addpath(fullfile(repoRoot, 'Matlab'));
 
 % ---------------- Configuration ----------------
@@ -133,4 +135,3 @@ if nFail > 0
         fprintf(2, '  %s\n', err{badIdx(k)});
     end
 end
-
