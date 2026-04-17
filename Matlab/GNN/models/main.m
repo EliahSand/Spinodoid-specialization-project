@@ -12,10 +12,7 @@ dataDir = fullfile("Matlab/GNN/data/dataset/samples");
 
 
 %%name the labels
-node_ID = 
-P_x = 
-P_y = 
-P_z = 
-U_x = 
-U_y = 
-U_z = 
+
+
+%% split dataset into training val test
+
