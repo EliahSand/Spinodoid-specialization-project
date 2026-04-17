@@ -1,0 +1,47 @@
+GNN Pipeline Cleanup — 2026-04-17
+===================================
+
+Five targeted improvements to the 4-step GNN dataset pipeline.
+No changes to algorithm logic or output format.
+
+---
+
+1. Shared ensure_full_pool helper (step1 + step3)
+   Files: pipeline/ensure_full_pool.m (new), step1_*.m, step3_*.m
+   The identical ensure_full_pool function was copy-pasted in both
+   step1 and step3. Extracted to pipeline/ensure_full_pool.m.
+   Both scripts now call it via addpath(scriptDir).
+
+2. Faster find_run_dirs (step3)
+   File: step3_batch_structural_graph_from_inp.m
+   The old implementation called genpath() which generates a colon-
+   separated string of every subdirectory in the tree, then strsplit
+   tokenizes it. For 6000+ sample directories this allocates one large
+   string and scans every subdirectory even if most are not run dirs.
+   Replaced with a recursive dir()-based scan that stops descending
+   into a folder as soon as sheet.mat + mesh_manifest.json are found.
+
+3. Split skip counter in step3
+   File: step3_batch_structural_graph_from_inp.m
+   nSkip previously counted both "no INP file" (step2 not yet run)
+   and "sample.mat already exists" (resume). Split into nSkipNoInp
+   and nSkipDone so the log clearly distinguishes the two cases.
+
+4. O(N^2) -> O(N) radius map in extract_structural_graph_gnn
+   File: gnn_graph/extract_structural_graph_gnn.m
+   compute_physical_radius_map used a Dijkstra variant with a linear
+   minimum scan (min(candidates(:))) inside the main loop, making it
+   O(N^2) in the number of occupied grid cells. Since INP meshes are
+   always on a uniform regular grid, BFS hop-count * h gives the exact
+   same physical radius. The Dijkstra while-loop was replaced by a
+   single call to multi_source_grid_distance (already present in the
+   file) followed by scaling by spacingInfo.h.
+
+5. Avoid redundant graph object construction in cleanup loop
+   File: gnn_graph/extract_structural_graph_gnn.m
+   find_short_edge_contraction_candidate and find_junction_cluster_pair
+   each built a new MATLAB graph object on every call, including the
+   final call that finds no candidate and exits the while loop. The
+   cleanup loop in cleanup_structural_graph now builds the graph once
+   via build_state_graph() and only rebuilds after a successful merge.
+   Both candidate functions now accept G, deg, compId as arguments.
