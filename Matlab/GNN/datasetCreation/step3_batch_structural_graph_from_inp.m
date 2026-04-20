@@ -30,6 +30,8 @@ addpath(genpath(fullfile(gnnPrepRoot, 'src')));
 % GNN-specific minimal graph functions (override originals for this pipeline).
 addpath(fullfile(scriptDir, 'gnn_graph'));
 
+OVERWRITE = true;   % set false to skip already-completed samples
+
 runDirs = find_run_dirs(samplesRoot);
 fprintf('Step 3 (INP-only): discovered %d run folders.\n', numel(runDirs));
 
@@ -51,7 +53,7 @@ for i = 1:numel(runDirs)
 
     sampleDir = fullfile(datasetRoot, runName);
     sampleMatPath = fullfile(sampleDir, 'sample.mat');
-    if isfile(sampleMatPath)
+    if ~OVERWRITE && isfile(sampleMatPath)
         nSkipDone = nSkipDone + 1;
         continue;
     end

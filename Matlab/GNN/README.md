@@ -19,16 +19,16 @@ Matlab/GNN/data/
 ## Steps
 
 1. Generate 6000 shell geometries (91 angles, 3 ratios, unique seeds per angle-ratio):
-   - `matlab -batch "run('Matlab/GNN/pipeline/step1_generate_psscone_shell_dataset.m')"`
+   - `matlab -batch "run('Matlab/GNN/datasetCreation/step1_generate_psscone_shell_dataset.m')"`
 2. Convert MAT -> shell INP:
-   - `py -3 Matlab/GNN/pipeline/step2_mat_to_shell_inp.py`
+   - `py -3 Matlab/GNN/datasetCreation/step2_mat_to_shell_inp.py`
 3. Build structural graphs from INP only (pre-deformation):
-   - `matlab -batch "run('Matlab/GNN/pipeline/step3_batch_structural_graph_from_inp.m')"`
+   - `matlab -batch "run('Matlab/GNN/datasetCreation/step3_batch_structural_graph_from_inp.m')"`
 4. Run Abaqus shell simulations and package midpoint curvature targets:
-   - `abaqus cae noGUI=Matlab/GNN/pipeline/step4_run_abaqus_shell.py --`
-   - Dry-run: `abaqus cae noGUI=Matlab/GNN/pipeline/step4_run_abaqus_shell.py -- --dry-run`
+   - `abaqus cae noGUI=Matlab/GNN/datasetCreation/step4_run_abaqus_shell.py --`
+   - Dry-run: `abaqus cae noGUI=Matlab/GNN/datasetCreation/step4_run_abaqus_shell.py -- --dry-run`
    - Package only from existing `midplane_results_shell.csv` files (no Abaqus rerun):
-     `abaqus cae noGUI=Matlab/GNN/pipeline/step4_run_abaqus_shell.py -- --package-only`
+     `abaqus cae noGUI=Matlab/GNN/datasetCreation/step4_run_abaqus_shell.py -- --package-only`
 
 ## Important policy
 

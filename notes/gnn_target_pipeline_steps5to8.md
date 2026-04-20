@@ -14,7 +14,7 @@ genuine measures of generalization, not artefacts of basis construction.
 
 ## Step 5 — Build `u3(s)` target dataset
 
-**Script:** `Matlab/GNN/pipeline/step5_build_u3_target_dataset.m`
+**Script:** `Matlab/GNN/datasetCreation/step5_build_u3_target_dataset.m`
 
 **Inputs (per sample):** `midpoint_results_shell.csv` (columns Y, Z, U2, U3), `meta.json`
 
@@ -68,7 +68,7 @@ would make it impossible to prevent val/test information from entering the basis
 
 ## Step 6 — Stratified train / val / test split
 
-**Script:** `Matlab/GNN/pipeline/step6_split_dataset.m`
+**Script:** `Matlab/GNN/datasetCreation/step6_split_dataset.m`
 
 **Inputs:** `u3_targets.mat`
 
@@ -104,7 +104,7 @@ alternate seed (43), confirming reproducibility is not masking a fragile split.
 
 ## Step 7 — Fit PCA on training data only
 
-**Script:** `Matlab/GNN/pipeline/step7_fit_pca_u3.m`
+**Script:** `Matlab/GNN/datasetCreation/step7_fit_pca_u3.m`
 
 **Inputs:** `u3_targets.mat`, `split_indices.mat`
 
@@ -232,7 +232,7 @@ whether those samples should be in the dataset at all, or whether K needs increa
 
 ## Step 8 — Diagnostics (Q1–Q6)
 
-**Script:** `Matlab/GNN/pipeline/step8_verify_pca_target.m`
+**Script:** `Matlab/GNN/datasetCreation/step8_verify_pca_target.m`
 
 **Inputs:** `u3_targets.mat`, `split_indices.mat`, `pca_model.mat`, `pca_targets.mat`
 

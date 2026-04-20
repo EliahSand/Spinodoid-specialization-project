@@ -2,8 +2,8 @@
 """Step 4 wrapper: run Abaqus shell batch and package midpoint targets.
 
 How to run:
-  abaqus cae noGUI=Matlab/GNN/pipeline/step4_run_abaqus_shell.py --
-  abaqus cae noGUI=Matlab/GNN/pipeline/step4_run_abaqus_shell.py -- --dry-run
+  abaqus cae noGUI=Matlab/GNN/datasetCreation/step4_run_abaqus_shell.py --
+  abaqus cae noGUI=Matlab/GNN/datasetCreation/step4_run_abaqus_shell.py -- --dry-run
  
 
 Writes:

@@ -2,8 +2,8 @@
 """Step 2 wrapper: reuse existing batch MAT->shell INP converter.
 
 How to run:
-  python3 Matlab/GNN/pipeline/step2_mat_to_shell_inp.py
-  python3 Matlab/GNN/pipeline/step2_mat_to_shell_inp.py --dry-run
+  python3 Matlab/GNN/datasetCreation/step2_mat_to_shell_inp.py
+  python3 Matlab/GNN/datasetCreation/step2_mat_to_shell_inp.py --dry-run
 """
 
 from __future__ import annotations
