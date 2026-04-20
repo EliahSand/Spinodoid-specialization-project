@@ -32,7 +32,11 @@ def format_extra_args(args):
 def main():
     repo_root = repo_root_from_here()
     defect_root = os.path.join(repo_root, DEFECT_ROOT_REL)
-    manifests = sorted(glob.glob(os.path.join(defect_root, 'def*', 'mesh_manifest.json')))
+    manifests = []
+    for dirpath, _dirnames, filenames in os.walk(defect_root):
+        if 'mesh_manifest.json' in filenames:
+            manifests.append(os.path.join(dirpath, 'mesh_manifest.json'))
+    manifests.sort()
     if not manifests:
         raise SystemExit(
             'No generated defect manifests were found under %s.' % DEFECT_ROOT_REL

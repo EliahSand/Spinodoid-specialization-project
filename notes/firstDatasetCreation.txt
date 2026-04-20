@@ -36,3 +36,6 @@ So:
 
 Without failed Step 3 attempt: 1205.29 min = 20h 5m
 Including the failed Step 3 attempt: ~1316.5 min = 21h 57m
+
+
+Batch complete in 4636.4 seconds (77.27 minutes).  defect {30,45,60,90}

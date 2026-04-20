@@ -17,7 +17,7 @@ import sys
 def main():
     repo_root = Path(__file__).resolve().parents[2]
     defect_root = repo_root / "Matlab" / "defectPrediction" / "results"
-    manifests = sorted(defect_root.glob("def*/mesh_manifest.json"))
+    manifests = sorted(defect_root.rglob("mesh_manifest.json"))
     if not manifests:
         raise SystemExit(
             "No generated defect manifests were found under Matlab/defectPrediction/results."
