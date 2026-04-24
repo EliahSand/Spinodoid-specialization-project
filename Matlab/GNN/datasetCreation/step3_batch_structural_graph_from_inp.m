@@ -115,10 +115,29 @@ ensure_dir(sampleDir);
 
 sampleMatPath = fullfile(sampleDir, 'sample.mat');
 
+% Boundary flag: node is on the sheet perimeter if its XY is within
+% tolerance of the bounding box. Tolerance = 1e-4 × max(XY range).
+xy  = structuralGraph.node_coords;   % N×2
+rng_xy = max(range(xy), [], 1);
+tol    = 1e-4 * max(rng_xy);
+xLo = min(xy(:,1)); xHi = max(xy(:,1));
+yLo = min(xy(:,2)); yHi = max(xy(:,2));
+boundaryFlag = double( ...
+    xy(:,1) - xLo < tol | xHi - xy(:,1) < tol | ...
+    xy(:,2) - yLo < tol | yHi - xy(:,2) < tol);   % N×1
+
+% Parse TR ratio and loading angle from folder name
+tk = regexp(runName, 'tr(\d+)', 'tokens', 'once');
+tr_ratio = NaN; if ~isempty(tk), tr_ratio = str2double(tk{1}) / 100; end
+tk = regexp(runName, 'ang(\d+)', 'tokens', 'once');
+ang_deg  = NaN; if ~isempty(tk), ang_deg  = str2double(tk{1}); end
+
 gnn_data = struct();
 gnn_data.edge_index = int32(structuralGraph.edge_index);
 gnn_data.num_nodes  = structuralGraph.num_nodes;
-gnn_data.x          = [structuralGraph.node_coords, structuralGraph.node_radius];
+gnn_data.x          = [structuralGraph.node_coords, structuralGraph.node_radius, boundaryFlag];  % N×4
+gnn_data.tr_ratio   = tr_ratio;
+gnn_data.ang_deg    = ang_deg;
 
 save(sampleMatPath, 'gnn_data', '-v7');
 end

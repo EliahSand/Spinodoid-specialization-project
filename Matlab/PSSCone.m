@@ -29,7 +29,7 @@ cfg.t_spin       = 1e-3;        %spinodal thickness         (vanligvis 1e-3)
 cfg.t_base       = 2e-3;        %base thickness             (vanligvis 2e-3)
 cfg.tilesXY      = [1 1];       %tiling for periodicity
 cfg.slice_count  = 8;           %builds 2D spinodal patterm for shell by averaging top "slice_count" for 3D field, then majority thresholding
-cfg.lamellarAngleDeg = 0;       %lamellar angle to x-axis
+cfg.lamellarAngleDeg = 45;       %lamellar angle to x-axis
 cfg.resultsRoot  = [];
 
 fields = fieldnames(cfg);

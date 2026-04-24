@@ -16,7 +16,7 @@ REPO_ROOT   = fileparts(fileparts(fileparts(fileparts(mfilename('fullpath')))));
 SAMPLES_DIR = fullfile(REPO_ROOT, 'Matlab', 'GNN', 'data', 'dataset', 'samples');
 TARGETS_DIR = fullfile(REPO_ROOT, 'Matlab', 'GNN', 'data', 'dataset', 'targets');
 
-SCHEMA_VERSION = 1;
+SCHEMA_VERSION = 2;
 
 %% Discover sample folders
 
@@ -43,15 +43,19 @@ sample_ids = sampleDirs;   % cell(n,1) of folder names
 X_cell     = cell(n, 1);
 ei_cell    = cell(n, 1);
 N_vec      = zeros(n, 1);
+TR_vec     = nan(n, 1);
+ANG_vec    = nan(n, 1);
 
 t0 = tic;
 for i = 1:n
     d  = load(fullfile(SAMPLES_DIR, sample_ids{i}, 'sample.mat'), 'gnn_data');
     gd = d.gnn_data;
 
-    X_cell{i}  = single(gd.x.');          % 3 x N
+    X_cell{i}  = single(gd.x.');          % 4 x N  (x, y, radius, boundary)
     ei_cell{i} = double(gd.edge_index);   % 2 x E
     N_vec(i)   = gd.num_nodes;
+    TR_vec(i)  = gd.tr_ratio;
+    ANG_vec(i) = gd.ang_deg;
 
     if mod(i, 500) == 0
         fprintf('  %d / %d  (%.1f s)\n', i, n, toc(t0));
@@ -67,7 +71,7 @@ created_at     = datestr(now, 'yyyy-mm-ddTHH:MM:SS');
 schema_version = SCHEMA_VERSION;
 
 outFile = fullfile(TARGETS_DIR, 'graphs_all.mat');
-save(outFile, 'sample_ids', 'X_cell', 'ei_cell', 'N_vec', ...
+save(outFile, 'sample_ids', 'X_cell', 'ei_cell', 'N_vec', 'TR_vec', 'ANG_vec', ...
     'schema_version', 'created_at', '-v7.3');
 fprintf('Saved: %s\n', outFile);
 

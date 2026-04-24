@@ -17,3 +17,4 @@ CLAUDE.md
 .claude 
 
 Matlab/defectPrediction/results/*
+Matlab/GNN/models/best/*

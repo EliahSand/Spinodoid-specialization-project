@@ -1,9 +1,10 @@
-function Zhat = gcn_forward(params, X, A_hat, K, nodeMask, gpuUse)
-%GCN_FORWARD Graph-level GCN: K residual message-passing layers + masked mean-pool.
-%   X:        F×maxN×G (plain or dlarray)
-%   A_hat:    G×1 cell of sparse maxN×maxN normalized adjacency
-%   nodeMask: 1×maxN×G logical or single
-%   Zhat:     nComp×1×G dlarray
+function Zhat = gcn_forward(params, X, A_hat, K, nodeMask, gpuUse, G_global)
+%GCN_FORWARD Graph-level GCN with mean pooling and concatenated global features.
+%   X:        F×maxN×B (plain or dlarray)
+%   A_hat:    B×1 cell of sparse maxN×maxN normalized adjacency
+%   nodeMask: 1×maxN×B logical or single
+%   G_global: nGlobal×1×B dlarray of standardized global features (tr_ratio, ang_deg)
+%   Zhat:     nComp×1×B dlarray
 
 B = size(X, 3);
 
@@ -15,8 +16,12 @@ for b = 1:B
     A_dense{b} = A;
 end
 
+% Prepare mask for GCN layers (must zero out padding activations)
+mask = dlarray(single(nodeMask));  % 1×maxN×B, no gradient
+
 % Embedding layer
-u = tanh(pagemtimes(params.Embedding.W, X) + params.Embedding.b);
+u = relu(pagemtimes(params.Embedding.W, X) + params.Embedding.b);
+u = u .* mask;                  % Zero out padded nodes
 
 % GCN layers with residual connection
 for i = 1:K
@@ -25,22 +30,25 @@ for i = 1:K
     for b = 1:B
         Vagg(:,:,b) = dlarray((A_dense{b} * v(:,:,b).').');
     end
-    u = u + tanh(Vagg);
+    u = relu(u + Vagg);
+    u = u .* mask;              % Zero out padded nodes after each layer
 end
 
-% Masked mean-pool: F×maxN×G → F×1×G
-if isa(u, 'dlarray')
-    uData = extractdata(u);
+% Masked mean-pool: extract graph-level structure summary
+h_pool_gcn = sum(u .* mask, 2) ./ (sum(mask, 2) + eps);  % hiddenDim×1×B
+
+% Concatenate global features (loading context)
+if nargin >= 7 && ~isempty(G_global)
+    if ~isa(G_global, 'dlarray'), G_global = dlarray(G_global); end
+    h_pool = cat(1, h_pool_gcn, G_global);  % (hiddenDim+nGlobal)×1×B
 else
-    uData = u;
+    h_pool = h_pool_gcn;
 end
-mask = cast(nodeMask, 'like', uData);
-mask = dlarray(mask);           % 1×maxN×G, no gradient
 
-u_m = u .* mask;
-h   = sum(u_m, 2) ./ sum(mask, 2);   % F×1×G (sum(mask,2) > 0 for all valid graphs)
+% Readout head
+h1 = relu(pagemtimes(params.Readout1.W, h_pool) + params.Readout1.b);  % readoutDim×1×B
+h2 = relu(pagemtimes(params.Readout2.W, h1) + params.Readout2.b);      % readoutDim×1×B
 
-% Pool MLP → Decoder
-h    = tanh(pagemtimes(params.PoolMLP.W, h) + params.PoolMLP.b);
-Zhat = pagemtimes(params.Decoder.W, h) + params.Decoder.b;   % nComp×1×G
+% Output decoder
+Zhat = pagemtimes(params.Decoder.W, h2) + params.Decoder.b;   % nComp×1×B
 end
