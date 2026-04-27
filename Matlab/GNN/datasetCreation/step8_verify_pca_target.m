@@ -10,7 +10,9 @@
 % Outputs:  diagnostics/pca_diagnostics.json
 %           diagnostics/scree.png
 %           diagnostics/coeff_hist.png
-%           diagnostics/worst_recon.png
+%           diagnostics/worst_recon/
+%           diagnostics/best_recon/
+%           diagnostics/avg_recon/
 
 %% ---- Config ---------------------------------------------------------------
 REPO_ROOT   = fileparts(fileparts(fileparts(fileparts(mfilename('fullpath')))));
@@ -18,6 +20,8 @@ TARGETS_DIR = fullfile(REPO_ROOT, 'Matlab', 'GNN', 'data', 'dataset', 'targets')
 DIAG_DIR    = fullfile(TARGETS_DIR, 'diagnostics');
 
 N_WORST      = 5;     % samples to plot for worst-reconstruction panel
+N_BEST       = 5;     % samples to plot for best-reconstruction panel
+N_AVG        = 5;     % samples to plot for average-reconstruction panel
 N_HIST_PCS   = 8;     % PCs to show in coefficient histogram
 STABILITY_SEED = 43;  % alternate seed for basis stability check (Q3)
 
@@ -209,38 +213,35 @@ fprintf('  PC1 std=%.4f  PC2 std=%.4f  PC3 std=%.4f\n', ...
     std(Z_train(:,1)), std(Z_train(:,min(2,K))), std(Z_train(:,min(3,K))));
 
 %% =========================================================================
-%% Q5 — Worst reconstructions (visual)
+%% Q5 — Worst / average / best reconstructions (visual)
 %% =========================================================================
-fprintf('\n--- Q5: Worst reconstructions ---\n');
+fprintf('\n--- Q5: Worst / average / best reconstructions ---\n');
 
 U3_val_recon = Z_val * coeff' + u3_mean;
 err_val = U3(val_idx,:) - U3_val_recon;
 per_sample_rel_val = sqrt(mean(err_val.^2, 2)) ./ max(abs(U3(val_idx,:)), [], 2);
-[~, sort_ord] = sort(per_sample_rel_val, 'descend');
-worst_k = sort_ord(1:min(N_WORST, numel(sort_ord)));
+[~, sort_ord] = sort(per_sample_rel_val, 'descend');   % sort_ord(1) = worst
+n_val = numel(sort_ord);
 
-WORST_DIR = fullfile(DIAG_DIR, 'worst_recon');
-if ~isfolder(WORST_DIR), mkdir(WORST_DIR); end
+worst_k = sort_ord(1 : min(N_WORST, n_val));
+best_k  = sort_ord(n_val : -1 : max(1, n_val - N_BEST + 1));   % rank 1 = best
+mid     = round(n_val / 2);
+half    = floor(N_AVG / 2);
+avg_range = max(1, mid - half) : min(n_val, mid - half + N_AVG - 1);
+avg_k   = sort_ord(avg_range);
 
-for wi = 1:numel(worst_k)
-    idx_in_val = worst_k(wi);
-    global_idx = val_idx(idx_in_val);
-    sid = sample_ids{global_idx};
-    fig = figure('Visible','off');
-    fig.Position = [0 0 600 420];
-    plot(s_grid, U3(global_idx,:), 'b-', 'LineWidth', 1.2, 'DisplayName', 'True');
-    hold on;
-    plot(s_grid, U3_val_recon(idx_in_val,:), 'r--', 'LineWidth', 1.2, 'DisplayName', 'Recon');
-    title(sprintf('Rank %d  —  Rel err = %.2f%%\n%s', wi, 100*per_sample_rel_val(idx_in_val), ...
-        strrep(sid,'_','\_')), 'FontSize', 9, 'Interpreter', 'tex');
-    xlabel('s (normalized arc length)'); ylabel('u3 (m)');
-    legend('Location','best');
-    grid on;
-    fname = fullfile(WORST_DIR, sprintf('worst_%02d_%s.png', wi, sid));
-    exportgraphics(fig, fname, 'Resolution', 150);
-    close(fig);
-end
-fprintf('  Saved %d individual plots to worst_recon/\n', numel(worst_k));
+plot_recon_batch(fullfile(DIAG_DIR, 'worst_recon'), 'Worst', worst_k, per_sample_rel_val, val_idx, U3, U3_val_recon, s_grid, sample_ids);
+plot_recon_batch(fullfile(DIAG_DIR, 'best_recon'),  'Best',  best_k,  per_sample_rel_val, val_idx, U3, U3_val_recon, s_grid, sample_ids);
+plot_recon_batch(fullfile(DIAG_DIR, 'avg_recon'),   'Avg',   avg_k,   per_sample_rel_val, val_idx, U3, U3_val_recon, s_grid, sample_ids);
+
+fprintf('  Saved %d worst, %d best, %d avg plots\n', numel(worst_k), numel(best_k), numel(avg_k));
+
+diag.q5_worst_ids = sample_ids(val_idx(worst_k))';
+diag.q5_worst_rel = per_sample_rel_val(worst_k)';
+diag.q5_best_ids  = sample_ids(val_idx(best_k))';
+diag.q5_best_rel  = per_sample_rel_val(best_k)';
+diag.q5_avg_ids   = sample_ids(val_idx(avg_k))';
+diag.q5_avg_rel   = per_sample_rel_val(avg_k)';
 
 %% =========================================================================
 %% Q6 — Learnability baseline (ridge regression from cheap inputs)
@@ -309,7 +310,30 @@ fprintf(fid, '%s\n', jsonencode(diag));
 fclose(fid);
 fprintf('Diagnostics written: %s\n', diagFile);
 
-%% ---- Local helper ---------------------------------------------------------
+%% ---- Local helpers --------------------------------------------------------
 function s = verdict(pass)
 if pass, s = 'PASS'; else, s = 'WARN'; end
+end
+
+function plot_recon_batch(out_dir, label, indices_in_val, per_sample_rel_val, val_idx, U3, U3_val_recon, s_grid, sample_ids)
+if ~isfolder(out_dir), mkdir(out_dir); end
+for wi = 1:numel(indices_in_val)
+    idx_in_val = indices_in_val(wi);
+    global_idx = val_idx(idx_in_val);
+    sid = sample_ids{global_idx};
+    fig = figure('Visible','off');
+    fig.Position = [0 0 600 420];
+    plot(s_grid, U3(global_idx,:), 'b-', 'LineWidth', 1.2, 'DisplayName', 'True');
+    hold on;
+    plot(s_grid, U3_val_recon(idx_in_val,:), 'r--', 'LineWidth', 1.2, 'DisplayName', 'Recon');
+    title(sprintf('%s rank %d  —  Rel err = %.2f%%\n%s', label, wi, ...
+        100*per_sample_rel_val(idx_in_val), strrep(sid,'_','\_')), ...
+        'FontSize', 9, 'Interpreter', 'tex');
+    xlabel('s (normalized arc length)'); ylabel('u3 (m)');
+    legend('Location','best');
+    grid on;
+    fname = fullfile(out_dir, sprintf('%s_%02d_%s.png', lower(label), wi, sid));
+    exportgraphics(fig, fname, 'Resolution', 150);
+    close(fig);
+end
 end
