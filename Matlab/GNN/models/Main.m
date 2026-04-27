@@ -10,20 +10,19 @@ addpath(genpath(fullfile(gnnRoot, 'helpers')));
 %% Config
 
 training       = true;
-subsetFraction = 0.5;     % 1.0 = full dataset; 0.1 = 10% feks
-K              = 12;       % GCN layers (normally 3)
-hiddenDim      = 128;     % GCN hidden dimension
-poolDim        = 128;     % (unused, replaced by readoutDim)
-readoutDim     = 128;     % Readout head dimension after attention pooling
-batchSize      = 32;      %32
-maxEpochs      = 120;       %120
-lr0            = 1e-3;
-decay_rate     = 0.99;
-weight_decay   = 1e-5;
-valFreq        = 5;
-patience       = 10;
-minDelta       = 1e-4;
-gpuUse         = canUseGPU;
+subsetFraction = 0.2;     % 1.0 = full dataset; 0.1 = 10% feks
+K              = 3;       % GCN layers (normally 3)
+hiddenDim      = 64;      %64
+poolDim      = 64;
+batchSize    = 32;      %32
+maxEpochs    = 120;       %120
+lr0          = 3e-3;
+decay_rate   = 0.99;
+weight_decay = 1e-5;
+valFreq      = 2;
+patience     = 10;
+minDelta     = 1e-4;
+gpuUse       = canUseGPU;
 
 runName    = datestr(now, 'yyyymmdd_HHMMSS');   % override for named runs, e.g. 'k3_h64'
 
@@ -85,17 +84,16 @@ nTest  = numel(test_ids);
 %% Load graphs
 
 fprintf('Loading %d training graphs...\n',   nTrain);
-[Xtr, eiTr, NTr, Gtr] = load_graph_dataset(train_ids, samplesDir);
+[Xtr, eiTr, NTr] = load_graph_dataset(train_ids, samplesDir);
 fprintf('Loading %d validation graphs...\n', nVal);
-[Xvl, eiVl, NVl, Gvl] = load_graph_dataset(val_ids, samplesDir);
+[Xvl, eiVl, NVl] = load_graph_dataset(val_ids, samplesDir);
 fprintf('Loading %d test graphs...\n',       nTest);
-[Xts, eiTs, NTs, Gts] = load_graph_dataset(test_ids, samplesDir);
+[Xts, eiTs, NTs] = load_graph_dataset(test_ids, samplesDir);
 
 % Stack all splits; track local index ranges
 allX  = [Xtr;  Xvl;  Xts];
 allEI = [eiTr; eiVl; eiTs];
 allN  = [NTr;  NVl;  NTs];
-G_all = [Gtr;  Gvl;  Gts];   % nAll × 2  ([tr_ratio, ang_deg])
 nAll  = nTrain + nVal + nTest;
 
 trainLocal = (1 : nTrain)';
@@ -111,8 +109,8 @@ maxN = max(allN);
 fprintf('maxN=%d  nAll=%d\n', maxN, nAll);
 
 fprintf('Normalizing node features...\n');
-[X_pad, nodeMask, normStats] = pad_and_normalize_graphs(allX, allN, trainMask, []);
-% X_pad:    4 × maxN × nAll  (single)  [x, y, radius, boundary]
+[X_pad, nodeMask, normStats] = pad_and_normalize_graphs(allX, allN, trainMask);
+% X_pad:    3 × maxN × nAll  (single)
 % nodeMask: 1 × maxN × nAll  (logical)
 
 fprintf('Building normalized adjacency matrices...\n');
@@ -127,53 +125,22 @@ Z_std(Z_std < 1e-8) = 1e-8;
 normStats.Z_mean = Z_mean;
 normStats.Z_std  = Z_std;
 
-% Variance-proportional loss weights: w_i ∝ Var(PC_i)
-% Weighted MSE on standardized Z = raw-Z MSE = u3-space MSE (orthonormal basis)
-loss_w = single(Z_std.^2);
-loss_w = loss_w / mean(loss_w);          % normalize: mean weight = 1
-loss_w = reshape(loss_w, nComp, 1, 1);  % nComp × 1 × 1
-normStats.loss_w = loss_w;
-
 Z_all     = [Z_train; Z_val; Z_test];                  % nAll × nComp
 Z_all_std = (Z_all - Z_mean) ./ Z_std;
 
 % Target tensor: nComp × 1 × nAll
 Z_target = single(reshape(Z_all_std', nComp, 1, []));
 
-%% Standardize global graph features
-G_mean = mean(G_all(trainLocal, :), 1);        % 1 × 2
-G_std  = std(G_all(trainLocal, :), 0, 1);
-G_std(G_std < 1e-8) = 1e-8;
-
-normStats.G_mean = G_mean;
-normStats.G_std  = G_std;
-
-G_all_std = single(reshape(((G_all - G_mean) ./ G_std)', 2, 1, []));  % 2 × 1 × nAll
-
 %% Initialize model
 
-F          = 4;     % node features: x, y, radius, boundary
-nGlobal    = 2;     % global features: tr_ratio, ang_deg (concatenated after pooling)
-params     = init_params(F, hiddenDim, poolDim, nComp, K, nGlobal, readoutDim);
+F      = 3;   % node features: x, y, radius
+params = init_params(F, hiddenDim, poolDim, nComp, K);
 
-fprintf('Params: F=%d  hidden=%d  readout=%d  K=%d  nComp=%d  nGlobal=%d\n', ...
-    F, hiddenDim, readoutDim, K, nComp, nGlobal);
-
-%% Move data and parameters to GPU (when available)
-
-M = single(nodeMask);   % 1 × maxN × nAll  (used as mask in loss)
-
-if gpuUse
-    fprintf('Moving tensors to GPU...\n');
-    X_pad     = gpuArray(X_pad);
-    M         = gpuArray(M);
-    Z_target  = gpuArray(Z_target);
-    G_all_std = gpuArray(G_all_std);
-    loss_w    = gpuArray(loss_w);
-    params    = dlupdate(@gpuArray, params);
-end
+fprintf('Params: F=%d  hidden=%d  pool=%d  K=%d  nComp=%d\n', F, hiddenDim, poolDim, K, nComp);
 
 %% Training
+
+M = single(nodeMask);   % 1 × maxN × nAll  (used as mask in loss)
 
 if training
     lossfcn = dlaccelerate(@model_loss);
@@ -199,8 +166,7 @@ if training
             idx = perm(si:ei);
 
             [loss, grad] = dlfeval(lossfcn, params, ...
-                X_pad(:,:,idx), A_hat(idx), K, M(:,:,idx), gpuUse, Z_target(:,:,idx), loss_w, ...
-                dlarray(G_all_std(:,:,idx)));
+                X_pad(:,:,idx), A_hat(idx), K, M(:,:,idx), gpuUse, Z_target(:,:,idx));
 
             grad      = dlupdate(@(g,p) g + weight_decay*p, grad, params);
             iteration = iteration + 1;
@@ -213,8 +179,7 @@ if training
 
         if epoch == 1 || mod(epoch, valFreq) == 0
             [valLoss, ~] = dlfeval(lossfcn, params, ...
-                X_pad(:,:,valLocal), A_hat(valLocal), K, M(:,:,valLocal), gpuUse, ...
-                Z_target(:,:,valLocal), loss_w, dlarray(G_all_std(:,:,valLocal)));
+                X_pad(:,:,valLocal), A_hat(valLocal), K, M(:,:,valLocal), gpuUse, Z_target(:,:,valLocal));
             valLoss = double(gather(extractdata(valLoss)));
             val_losses(epoch) = valLoss;
 
@@ -239,26 +204,16 @@ if training
         end
 
         if mod(epoch, 2) == 0 || epoch == 1
-            snap.epoch        = epoch;
-            snap.train_losses = train_losses;
-            snap.val_losses   = val_losses;
-            snap.params       = dlupdate(@gather, params);
-            save(progressFile, '-struct', 'snap', '-v7.3');
+            save(progressFile, 'epoch', 'train_losses', 'val_losses', 'params', '-v7.3');
         end
     end
     toc
 
     params = best_params;
-    cfg = struct('K', K, 'hiddenDim', hiddenDim, 'readoutDim', readoutDim, ...
+    cfg = struct('K', K, 'hiddenDim', hiddenDim, 'poolDim', poolDim, ...
                  'batchSize', batchSize, 'lr0', lr0, 'maxEpochs', maxEpochs, ...
-                 'bestEpoch', bestEpoch, 'nComp', nComp, 'nGlobal', nGlobal);
-
-    % Save on CPU for portability; keep GPU copy for downstream evaluation
-    params_cpu = dlupdate(@gather, params);
-    params_for_save = params;
-    params = params_cpu; 
+                 'bestEpoch', bestEpoch, 'nComp', nComp);
     save(paramFile, 'params', 'cfg', 'normStats', 'train_losses', 'val_losses');
-    params = params_for_save;
     fprintf('Saved best params (epoch %d) → %s\n', bestEpoch, paramFile);
 
 else
@@ -266,42 +221,20 @@ else
         error('Set training=true or provide %s', paramFile);
     end
     load(paramFile, 'params', 'cfg', 'normStats', 'train_losses', 'val_losses');
-    if gpuUse
-        params = dlupdate(@gpuArray, params);
-    end
     fprintf('Loaded params (best epoch=%d) from %s\n', cfg.bestEpoch, paramFile);
 end
 
 %% Evaluate on validation set
 
-Zhat_std = gcn_forward(params, X_pad(:,:,valLocal), A_hat(valLocal), K, M(:,:,valLocal), gpuUse, ...
-    dlarray(G_all_std(:,:,valLocal)));
+Zhat_std = gcn_forward(params, X_pad(:,:,valLocal), A_hat(valLocal), K, M(:,:,valLocal), gpuUse);
 Zhat_std = gather(extractdata(Zhat_std));   % nComp × 1 × nVal
 Zhat_val = squeeze(Zhat_std).' .* Z_std + Z_mean;   % nVal × nComp
 
 % Z-space metrics
-err_z    = Zhat_val - Z_val;                               % nVal × nComp
-ss_res_c = sum(err_z.^2, 1);                              % 1 × nComp
-ss_tot_c = sum((Z_val - mean(Z_val, 1)).^2, 1);
-
-% Per-component R²
-perPC_R2 = 1 - ss_res_c ./ max(ss_tot_c, eps);
-
-% Unweighted aggregate (treats all PCs equally — for comparison with old runs)
-R2_z_unw = 1 - sum(ss_res_c) / sum(ss_tot_c);
-
-% Variance-weighted aggregate (w_i ∝ Var(PC_i) → equivalent to u3-space R²)
-w_var      = Z_std.^2;
-R2_z_wt    = 1 - sum(w_var .* ss_res_c) / sum(w_var .* ss_tot_c);
-
-fprintf('\nValidation Z-space:\n');
-fprintf('  Unweighted R²:        %.4f   (equal weight per PC)\n', R2_z_unw);
-fprintf('  Variance-weighted R²: %.4f   (proportional to PC variance, ≈ u3-space R²)\n', R2_z_wt);
-fprintf('  Per-PC R²:');
-for c = 1:nComp
-    fprintf('  PC%d=%.3f', c, perPC_R2(c));
-end
-fprintf('\n');
+err_z  = Zhat_val - Z_val;
+mse_z  = mean(err_z(:).^2);
+R2_z   = 1 - sum(err_z(:).^2) / sum((Z_val(:) - mean(Z_val(:))).^2);
+fprintf('\nValidation Z-space:   MSE=%.4g  R2=%.4f\n', mse_z, R2_z);
 
 % u3-space metrics (decode PCA)
 U3_pred = Zhat_val * coeff' + u3_mean;      % nVal × N_GRID
@@ -310,7 +243,7 @@ U3_true = U3_mat(val_idx, :);
 err_u3 = U3_pred - U3_true;
 mse_u3 = mean(err_u3(:).^2);
 R2_u3  = 1 - sum(err_u3(:).^2) / sum((U3_true(:) - mean(U3_true(:))).^2);
-fprintf('Validation u3-space:  MSE=%.4g  R²=%.4f\n\n', mse_u3, R2_u3);
+fprintf('Validation u3-space:  MSE=%.4g  R2=%.4f\n\n', mse_u3, R2_u3);
 
 %% Plot: loss curve
 
@@ -318,7 +251,7 @@ valEpochs = find(val_losses > 0);
 hLoss = figure;
 plot(train_losses, '-r', 'LineWidth', 1.5); hold on;
 plot(valEpochs, val_losses(valEpochs), '-b', 'LineWidth', 1.5);
-xlabel('Epoch'); ylabel('Variance-weighted MSE (standardized Z)');
+xlabel('Epoch'); ylabel('MSE (standardized Z)');
 legend('Train', 'Validation', 'Location', 'northeast');
 title('Training curve');
 exportgraphics(hLoss, fullfile(bestDir, 'loss_curve.png'), 'Resolution', 150);
