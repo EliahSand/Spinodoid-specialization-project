@@ -1,22 +1,22 @@
 % step9_aggregate_graphs.m
 %
-% Aggregates all per-sample structural graphs into a single file so that
-% Main.m can load the entire dataset in one I/O call instead of opening
-% ~6000 individual sample.mat files.
+% Aggregates all per-sample hybrid structural+raster graphs into a single
+% file without touching the baseline data/dataset graph aggregate.
 %
-% Input:   data/dataset/samples/<run>/sample.mat  (one per sample, from step 3)
-% Outputs: data/dataset/targets/graphs_all.mat
-%          data/dataset/targets/graphs_all_manifest.json
+% Input:   data/dataset_hybrid/samples/<run>/sample.mat
+% Outputs: data/dataset_hybrid/targets/graphs_all.mat
+%          data/dataset_hybrid/targets/graphs_all_manifest.json
 %
 % Run after step 3 and before training.
 
 %% Config
 
 REPO_ROOT   = fileparts(fileparts(fileparts(fileparts(mfilename('fullpath')))));
-SAMPLES_DIR = fullfile(REPO_ROOT, 'Matlab', 'GNN', 'data', 'dataset', 'samples');
-TARGETS_DIR = fullfile(REPO_ROOT, 'Matlab', 'GNN', 'data', 'dataset', 'targets');
+SAMPLES_DIR = fullfile(REPO_ROOT, 'Matlab', 'GNN', 'data', 'dataset_hybrid', 'samples');
+TARGETS_DIR = fullfile(REPO_ROOT, 'Matlab', 'GNN', 'data', 'dataset_hybrid', 'targets');
 
-SCHEMA_VERSION = 2;
+SCHEMA_VERSION = 3;
+RASTER_SIZE    = 128;
 
 %% Discover sample folders
 
@@ -45,10 +45,12 @@ ei_cell    = cell(n, 1);
 N_vec      = zeros(n, 1);
 TR_vec     = nan(n, 1);
 ANG_vec    = nan(n, 1);
+Dense_cell = cell(n, 1);
+has_dense_count = 0;
 
 t0 = tic;
 for i = 1:n
-    d  = load(fullfile(SAMPLES_DIR, sample_ids{i}, 'sample.mat'), 'gnn_data');
+    d  = load(fullfile(SAMPLES_DIR, sample_ids{i}, 'sample.mat'));
     gd = d.gnn_data;
 
     X_cell{i}  = single(gd.x.');          % 4 x N  (x, y, radius, boundary)
@@ -56,6 +58,12 @@ for i = 1:n
     N_vec(i)   = gd.num_nodes;
     TR_vec(i)  = gd.tr_ratio;
     ANG_vec(i) = gd.ang_deg;
+    if isfield(d, 'dense_data') && isfield(d.dense_data, 'raster')
+        Dense_cell{i} = uint8(d.dense_data.raster);
+        has_dense_count = has_dense_count + 1;
+    else
+        Dense_cell{i} = rasterize_structural_graph(X_cell{i}, RASTER_SIZE);
+    end
 
     if mod(i, 500) == 0
         fprintf('  %d / %d  (%.1f s)\n', i, n, toc(t0));
@@ -71,7 +79,7 @@ created_at     = datestr(now, 'yyyy-mm-ddTHH:MM:SS');
 schema_version = SCHEMA_VERSION;
 
 outFile = fullfile(TARGETS_DIR, 'graphs_all.mat');
-save(outFile, 'sample_ids', 'X_cell', 'ei_cell', 'N_vec', 'TR_vec', 'ANG_vec', ...
+save(outFile, 'sample_ids', 'X_cell', 'ei_cell', 'N_vec', 'TR_vec', 'ANG_vec', 'Dense_cell', ...
     'schema_version', 'created_at', '-v7.3');
 fprintf('Saved: %s\n', outFile);
 
@@ -86,6 +94,8 @@ end
 
 manifest = struct( ...
     'n_graphs',        n, ...
+    'n_dense_native',  has_dense_count, ...
+    'raster_size',     RASTER_SIZE, ...
     'schema_version',  schema_version, ...
     'git_sha',         git_sha, ...
     'created_at',      created_at);
@@ -96,3 +106,27 @@ fprintf(fid, '%s\n', jsonencode(manifest));
 fclose(fid);
 fprintf('Manifest: %s\n', manifestFile);
 fprintf('Done.\n');
+
+function raster = rasterize_structural_graph(X, gridSize)
+xy = double(X(1:2, :).');
+if size(X, 1) >= 4
+    boundary = logical(X(4, :).');
+else
+    boundary = false(size(xy, 1), 1);
+end
+
+xLo = min(xy(:, 1)); xHi = max(xy(:, 1));
+yLo = min(xy(:, 2)); yHi = max(xy(:, 2));
+
+cols = 1 + round((xy(:, 1) - xLo) / max(xHi - xLo, eps) * (gridSize - 1));
+rows = 1 + round((xy(:, 2) - yLo) / max(yHi - yLo, eps) * (gridSize - 1));
+cols = min(gridSize, max(1, cols));
+rows = min(gridSize, max(1, rows));
+
+occupancy = false(gridSize, gridSize);
+boundaryMask = false(gridSize, gridSize);
+idx = sub2ind([gridSize, gridSize], rows, cols);
+occupancy(idx) = true;
+boundaryMask(idx(boundary)) = true;
+raster = uint8(cat(3, occupancy, boundaryMask));
+end

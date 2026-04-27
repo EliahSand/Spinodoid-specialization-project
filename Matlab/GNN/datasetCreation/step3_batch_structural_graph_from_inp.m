@@ -3,12 +3,12 @@
 % Build structural graphs directly from shell INP files.
 % This is pre-deformation graph generation (no Abaqus CSV required).
 % Output is a single MATLAB sample file per run:
-%   Matlab/GNN/data/dataset/samples/<run_name>/sample.mat
+%   Matlab/GNN/data/dataset_hybrid/samples/<run_name>/sample.mat
 %
 % Input root:
 %   Matlab/GNN/data/raw/samples
 % Output root:
-%   Matlab/GNN/data/dataset/samples
+%   Matlab/GNN/data/dataset_hybrid/samples
 
 scriptPath = mfilename('fullpath');
 scriptDir = fileparts(scriptPath);
@@ -20,7 +20,7 @@ addpath(scriptDir);
 addpath(helpersDir);
 
 samplesRoot = fullfile(gnnRoot, 'data', 'raw', 'samples');
-datasetRoot = fullfile(gnnRoot, 'data', 'dataset', 'samples');
+datasetRoot = fullfile(gnnRoot, 'data', 'dataset_hybrid', 'samples');
 ensure_dir(datasetRoot);
 
 gnnPrepRoot = fullfile(repoRoot, 'Matlab', 'gnn_prep_spinodal');
@@ -31,6 +31,7 @@ addpath(genpath(fullfile(gnnPrepRoot, 'src')));
 addpath(fullfile(scriptDir, 'gnn_graph'));
 
 OVERWRITE = true;   % set false to skip already-completed samples
+MAX_TASKS = inf;    % set small integer for raster/detail smoke exports
 
 runDirs = find_run_dirs(samplesRoot);
 fprintf('Step 3 (INP-only): discovered %d run folders.\n', numel(runDirs));
@@ -67,6 +68,12 @@ if isempty(taskInpPaths)
     fprintf('Step 3 (INP-only) complete: ok=0 skip_no_inp=%d skip_done=%d fail=0 (%.2f min)\n', ...
         nSkipNoInp, nSkipDone, dt / 60);
     return;
+end
+
+if isfinite(MAX_TASKS) && numel(taskInpPaths) > MAX_TASKS
+    taskInpPaths = taskInpPaths(1:MAX_TASKS);
+    taskRunNames = taskRunNames(1:MAX_TASKS);
+    fprintf('Smoke mode: processing first %d graph tasks only.\n', MAX_TASKS);
 end
 
 pool = ensure_full_pool();
@@ -107,7 +114,7 @@ fullGraph = build_full_reference_graph_gnn(inpData, ...
     'PatternPriority', {'spinodal', 'top'});
 
 structuralGraph = extract_structural_graph_gnn(fullGraph, ...
-    'DetailLevel', 0.30, ...
+    'DetailLevel', 1.00, ...
     'MinIslandNodes', 1);
 
 sampleDir = fullfile(datasetRoot, runName);
@@ -138,8 +145,51 @@ gnn_data.num_nodes  = structuralGraph.num_nodes;
 gnn_data.x          = [structuralGraph.node_coords, structuralGraph.node_radius, boundaryFlag];  % N×4
 gnn_data.tr_ratio   = tr_ratio;
 gnn_data.ang_deg    = ang_deg;
+gnn_data.detail_level = 1.00;
+gnn_data.schema_version = 3;
 
-save(sampleMatPath, 'gnn_data', '-v7');
+dense_data = rasterize_full_reference_graph(fullGraph, 128);
+
+save(sampleMatPath, 'gnn_data', 'dense_data', '-v7');
+end
+
+function dense_data = rasterize_full_reference_graph(fullGraph, gridSize)
+xy = double(fullGraph.node_coords(:, 1:2));
+boundary = logical(fullGraph.boundary_mask(:));
+
+xLo = min(xy(:, 1)); xHi = max(xy(:, 1));
+yLo = min(xy(:, 2)); yHi = max(xy(:, 2));
+
+cols = 1 + round((xy(:, 1) - xLo) / max(xHi - xLo, eps) * (gridSize - 1));
+rows = 1 + round((xy(:, 2) - yLo) / max(yHi - yLo, eps) * (gridSize - 1));
+cols = min(gridSize, max(1, cols));
+rows = min(gridSize, max(1, rows));
+
+occupancy = false(gridSize, gridSize);
+boundaryMask = false(gridSize, gridSize);
+idx = sub2ind([gridSize, gridSize], rows, cols);
+occupancy(idx) = true;
+boundaryMask(idx(boundary)) = true;
+
+if isfield(fullGraph, 'edges_local') && ~isempty(fullGraph.edges_local)
+    edges = double(fullGraph.edges_local);
+    for e = 1:size(edges, 1)
+        s = edges(e, 1);
+        t = edges(e, 2);
+        nSteps = max(abs(rows(s) - rows(t)), abs(cols(s) - cols(t))) + 1;
+        rr = round(linspace(rows(s), rows(t), nSteps));
+        cc = round(linspace(cols(s), cols(t), nSteps));
+        edgeIdx = sub2ind([gridSize, gridSize], rr, cc);
+        occupancy(edgeIdx) = true;
+    end
+end
+
+dense_data = struct();
+dense_data.raster = uint8(cat(3, occupancy, boundaryMask));
+dense_data.channels = {'occupancy', 'boundary'};
+dense_data.grid_size = gridSize;
+dense_data.xy_bounds = [xLo, xHi, yLo, yHi];
+dense_data.schema_version = 1;
 end
 
 function ensure_dir(pathStr)
