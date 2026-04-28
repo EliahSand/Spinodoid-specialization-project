@@ -10,22 +10,22 @@ addpath(genpath(fullfile(gnnRoot, 'helpers')));
 %% Config
 
 training       = true;
-modelMode      = 'dense_only';   % 'hybrid', 'dense_only', or 'graph_only'
-subsetFraction = 0.5;        % use <1 only for smoke tests
+modelMode      = 'hybrid';   % 'hybrid', 'dense_only', or 'graph_only'
+subsetFraction = 0.1;        % use <1 only for smoke tests
 
 K              = 4;
 hiddenDim      = 96;
 cnnChannels    = [32, 64, 128];
 fusionDim      = 192;
-dropoutRate    = 0.30;
-batchSize      = 16;
+dropoutRate    = 0.2;
+batchSize      = 32;
 evalBatchSize  = 32;
 maxEpochs      = 180;
 lr0            = 7e-4;
 decay_rate     = 0.985;
-weight_decay   = 1e-4;
+weight_decay   = 1e-5;
 valFreq        = 5;
-patience       = 8;
+patience       = 12;
 minDeltaR2     = 1e-4;
 gpuUse         = canUseGPU;
 

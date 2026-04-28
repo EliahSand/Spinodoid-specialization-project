@@ -1,248 +1,212 @@
-function visualize_graph(sample_id, samplesDir, targetsDir, options)
-%VISUALIZE_GRAPH Visualize structural graph and analyze features
-%   sample_id:   Sample ID string (e.g., 'sheetCone_tr100_ang000_lamellar_N128_1x1')
-%   samplesDir:  Path to samples directory (e.g., '.../data/dataset/samples')
-%   targetsDir:  Path to targets directory (e.g., '.../data/dataset/targets')
-%   options:     Optional struct with fields:
-%       - showDeformation: false (default) or true (requires U3 data)
-%       - figName: figure name for saving
-%       - compareMode: 'none' (default), 'angle', or 'ratio'
-%       - fixedValue: fixed tr_ratio or ang_deg for comparison
-%       - nSamples: number of samples for comparison (default 4)
+function [figModel, figFull] = visualize_graph(sample_id, samplesDir, varargin)
+%VISUALIZE_GRAPH Show the two graph views that matter for one GNN sample.
+%   Tab 1: reduced input graph exactly as load_graph_dataset gives it to the
+%   model: node features [x, y, radius] and edge_index.
+%
+%   Tab 2: full reference graph for the same sample, rebuilt from the raw
+%   sheet_shell.inp with the gnn_prep_spinodal fullGraph builder.
+%
+%   Extra legacy arguments are accepted and ignored.
 
-if nargin < 4 || isempty(options)
-    options = struct('showDeformation', false, 'figName', 'graph_analysis', ...
-                     'compareMode', 'none', 'fixedValue', 30, 'nSamples', 4);
+if nargin < 2 || isempty(samplesDir)
+    samplesDir = default_samples_dir();
 end
 
-% Add GNN helpers to path
-gnnRoot = fileparts(fileparts(samplesDir));
-addpath(genpath(fullfile(gnnRoot, 'helpers')));
+sample_id = char(string(sample_id));
+samplesDir = char(string(samplesDir));
 
-%% Load graph data
+[gnnRoot, repoRoot] = infer_roots(samplesDir);
+addpath(fullfile(gnnRoot, 'helpers'));
 
-try
-    [X_cell, ei_cell, N_vec, G_mat] = load_graph_dataset({sample_id}, samplesDir);
-    X = X_cell{1};          % 4 × N (x, y, radius, boundary)
-    ei = ei_cell{1};        % 2 × E
-    N = N_vec(1);
-    tr_ratio = G_mat(1,1);
-    ang_deg = G_mat(1,2);
-catch ME
-    error('Failed to load graph: %s', ME.message);
+gnnPrepRoot = fullfile(repoRoot, 'Matlab', 'gnn_prep_spinodal');
+if ~isfolder(gnnPrepRoot)
+    error('visualize_graph:MissingGnnPrep', ...
+        'Could not find gnn_prep_spinodal at: %s', gnnPrepRoot);
+end
+addpath(gnnPrepRoot);
+addpath(genpath(fullfile(gnnPrepRoot, 'src')));
+
+[X_cell, ei_cell] = load_graph_dataset({sample_id}, samplesDir);
+X = double(X_cell{1});
+EI = double(ei_cell{1});
+
+assert_model_graph_schema(X, EI, sample_id);
+
+figModel = figure('Name', sprintf('Graph views: %s', sample_id), ...
+    'Color', 'w', 'Position', [80, 100, 900, 760]);
+figFull = figModel;
+tabs = uitabgroup(figModel);
+tabModel = uitab(tabs, 'Title', 'GNN input');
+tabFull = uitab(tabs, 'Title', 'Full graph');
+
+axModel = axes('Parent', tabModel);
+plot_model_input_graph(axModel, X, EI);
+title(axModel, sprintf('GNN input graph: %s', escape_title(sample_id)));
+
+inpPath = find_sample_inp(gnnRoot, sample_id);
+inpData = read_abaqus_inp(inpPath);
+fullGraph = build_full_reference_graph(inpData, ...
+    'ElsetName', 'SPINODAL_SHELL', ...
+    'AutoDetectElset', true, ...
+    'PatternPriority', {'spinodal', 'top'});
+
+axFull = axes('Parent', tabFull);
+plot_graph_mesh(fullGraph, ...
+    'AxesHandle', axFull, ...
+    'Title', sprintf('Full graph: %s', escape_title(sample_id)), ...
+    'Style', 'paper2d', ...
+    'BoundaryMode', 'interior', ...
+    'XLabel', 'x', ...
+    'YLabel', 'y');
+
+fprintf('Sample: %s\n', sample_id);
+fprintf('GNN input: %d nodes, %d edges, features [x y radius]\n', ...
+    size(X, 2), size(EI, 2));
+fprintf('Full graph: %d nodes, %d edges, source %s\n', ...
+    fullGraph.num_nodes, size(fullGraph.edges_local, 1), inpPath);
 end
 
-%% Load PCA targets (if available and requested)
+function samplesDir = default_samples_dir()
+scriptDir = fileparts(mfilename('fullpath'));
+gnnRoot = fullfile(fileparts(scriptDir), 'GNN');
+samplesDir = fullfile(gnnRoot, 'data', 'dataset', 'samples');
+end
 
-pca_target = [];
-if options.showDeformation
-    try
-        t = load(fullfile(targetsDir, 'pca_targets.mat'), 'Z_train', 'train_ids');
-        [~, idx] = ismember(sample_id, t.train_ids);
-        if idx > 0
-            pca_target = t.Z_train(idx, :);
-        end
-    catch
-        warning('Could not load PCA targets');
+function [gnnRoot, repoRoot] = infer_roots(samplesDir)
+datasetDir = fileparts(samplesDir);
+dataDir = fileparts(datasetDir);
+gnnRoot = fileparts(dataDir);
+repoRoot = fileparts(fileparts(gnnRoot));
+end
+
+function assert_model_graph_schema(X, EI, sample_id)
+if size(X, 1) ~= 3
+    error('visualize_graph:BadModelFeatures', ...
+        'Expected model features for "%s" to be 3xN: [x; y; radius]. Got %dx%d.', ...
+        sample_id, size(X, 1), size(X, 2));
+end
+if size(EI, 1) ~= 2
+    error('visualize_graph:BadEdgeIndex', ...
+        'Expected edge_index for "%s" to be 2xE. Got %dx%d.', ...
+        sample_id, size(EI, 1), size(EI, 2));
+end
+if ~isempty(EI) && (min(EI(:)) < 1 || max(EI(:)) > size(X, 2))
+    error('visualize_graph:EdgeIndexOutOfRange', ...
+        'edge_index for "%s" references nodes outside 1..%d.', sample_id, size(X, 2));
+end
+end
+
+function plot_model_input_graph(ax, X, EI)
+x = X(1, :).';
+y = X(2, :).';
+r = X(3, :).';
+
+hold(ax, 'on');
+draw_edges(ax, x, y, EI, [0.72, 0.72, 0.72], 0.45);
+
+validDisks = isfinite(r) & r > 0;
+draw_radius_disks(ax, x(validDisks), y(validDisks), r(validDisks));
+if any(~validDisks)
+    scatter(ax, x(~validDisks), y(~validDisks), 12, [0.20, 0.42, 0.85], ...
+        'filled', 'MarkerEdgeColor', 'none');
+end
+
+axis(ax, 'equal');
+axis(ax, 'tight');
+grid(ax, 'off');
+box(ax, 'on');
+xlabel(ax, 'x');
+ylabel(ax, 'y');
+set(ax, 'FontSize', 14, 'LineWidth', 1.0);
+hold(ax, 'off');
+end
+
+function draw_radius_disks(ax, x, y, r)
+if isempty(x)
+    return;
+end
+
+nNodes = numel(x);
+nSeg = 40;
+theta = linspace(0, 2 * pi, nSeg + 1);
+theta(end) = [];
+
+vertices = zeros(nNodes * nSeg, 2);
+faces = reshape(1:(nNodes * nSeg), nSeg, nNodes).';
+
+for i = 1:nNodes
+    rows = (i - 1) * nSeg + (1:nSeg);
+    vertices(rows, 1) = x(i) + r(i) * cos(theta(:));
+    vertices(rows, 2) = y(i) + r(i) * sin(theta(:));
+end
+
+patch(ax, ...
+    'Faces', faces, ...
+    'Vertices', vertices, ...
+    'FaceColor', [0.20, 0.42, 0.85], ...
+    'EdgeColor', 'none', ...
+    'FaceAlpha', 0.92);
+end
+
+function draw_edges(ax, x, y, EI, color, lineWidth)
+if isempty(EI)
+    return;
+end
+
+edgeX = [x(EI(1, :)).'; x(EI(2, :)).'; nan(1, size(EI, 2))];
+edgeY = [y(EI(1, :)).'; y(EI(2, :)).'; nan(1, size(EI, 2))];
+plot(ax, edgeX(:), edgeY(:), '-', 'Color', color, 'LineWidth', lineWidth);
+end
+
+function inpPath = find_sample_inp(gnnRoot, sample_id)
+trToken = regexp(sample_id, 'tr\d+', 'match', 'once');
+angToken = regexp(sample_id, 'ang\d+', 'match', 'once');
+rawSamplesRoot = fullfile(gnnRoot, 'data', 'raw', 'samples');
+
+if ~isempty(trToken) && ~isempty(angToken)
+    inpPath = fullfile(rawSamplesRoot, trToken, angToken, sample_id, 'sheet_shell.inp');
+    if isfile(inpPath)
+        return;
     end
 end
 
-%% Create figure
-
-if strcmp(options.compareMode, 'none')
-    h = figure('Name', options.figName, 'Position', [100 100 1200 800]);
-
-    % Plot 1: Graph topology
-    subplot(2, 3, 1);
-    plot_graph_topology(X, ei, sprintf('Topology: tr=%.2f, ang=%d°', tr_ratio, ang_deg));
-
-    % Plot 2: Node feature distributions
-    subplot(2, 3, 2);
-    plot_feature_distributions(X);
-
-    % Plot 3: Scatter plot: position vs radius
-    subplot(2, 3, 3);
-    plot_position_radius(X);
-
-    % Plot 4: Degree distribution
-    subplot(2, 3, 4);
-    plot_degree_distribution(ei, N);
-
-    % Plot 5: Boundary nodes
-    subplot(2, 3, 5);
-    plot_boundary_nodes(X, ei, sprintf('Boundary nodes: %.1f%% of nodes', sum(X(4,:))/N*100));
-
-    % Plot 6: Edge length distribution
-    subplot(2, 3, 6);
-    plot_edge_lengths(X, ei);
-
-    sgtitle(sprintf('Graph Analysis: %s', sample_id));
-
-else
-    % Comparison mode
-    visualize_comparison(samplesDir, targetsDir, options);
+inpPath = find_inp_recursive(rawSamplesRoot, sample_id);
+if isempty(inpPath)
+    error('visualize_graph:MissingInp', ...
+        'Could not find sheet_shell.inp for sample "%s" under %s.', ...
+        sample_id, rawSamplesRoot);
+end
 end
 
+function inpPath = find_inp_recursive(rootDir, sample_id)
+inpPath = '';
+if ~isfolder(rootDir)
+    return;
 end
 
-%% Helper functions
-
-function plot_graph_topology(X, ei, title_str)
-    x = X(1, :);
-    y = X(2, :);
-    radius = X(3, :);
-    boundary = double(X(4, :));
-
-    % Plot edges
-    for e = 1:size(ei, 2)
-        n1 = ei(1, e);
-        n2 = ei(2, e);
-        line([x(n1), x(n2)], [y(n1), y(n2)], 'Color', [0.7 0.7 0.7], 'LineWidth', 0.5);
+items = dir(rootDir);
+for k = 1:numel(items)
+    name = items(k).name;
+    if ~items(k).isdir || strcmp(name, '.') || strcmp(name, '..')
+        continue;
     end
 
-    % Plot nodes
-    hold on;
-    if (max(radius) - min(radius)) > eps
-        norm_radius = (radius - min(radius)) / (max(radius) - min(radius));
-        node_size = 20 + norm_radius * 80;  % 20-100
-    else
-        node_size = 50;  % All same size if radius is constant
-    end
-
-    scatter(x, y, node_size, boundary + 1, 'filled', 'MarkerFaceAlpha', 0.7);
-    colormap(jet);
-    c = colorbar;
-    c.Ticks = [1 2];
-    c.TickLabels = {'Interior', 'Boundary'};
-    c.Label.String = 'Boundary';
-    xlabel('x'); ylabel('y');
-    title(title_str);
-    axis equal tight;
-    hold off;
-end
-
-function plot_feature_distributions(X)
-    % Radius distribution
-    subplot(2, 2, 1);
-    histogram(X(3, :), 30);
-    xlabel('Radius'); ylabel('Count');
-    title('Radius Distribution');
-
-    % Boundary count
-    subplot(2, 2, 2);
-    pie([sum(X(4,:)), numel(X(4,:))-sum(X(4,:))], {'Boundary', 'Interior'});
-    title('Node Types');
-
-    % X coordinate
-    subplot(2, 2, 3);
-    histogram(X(1, :), 30);
-    xlabel('x position'); ylabel('Count');
-
-    % Y coordinate
-    subplot(2, 2, 4);
-    histogram(X(2, :), 30);
-    xlabel('y position'); ylabel('Count');
-end
-
-function plot_position_radius(X)
-    scatter(X(1, :), X(2, :), 20, X(3, :), 'filled', 'MarkerFaceAlpha', 0.7);
-    xlabel('x'); ylabel('y');
-    colorbar;
-    title('Position colored by Radius');
-    colormap(jet);
-end
-
-function plot_degree_distribution(ei, N)
-    deg = zeros(N, 1);
-    for e = 1:size(ei, 2)
-        deg(ei(1, e)) = deg(ei(1, e)) + 1;
-        deg(ei(2, e)) = deg(ei(2, e)) + 1;
-    end
-
-    histogram(deg, 0:max(deg)+1);
-    xlabel('Degree'); ylabel('Count');
-    title(sprintf('Degree Distribution (mean=%.2f)', mean(deg)));
-end
-
-function plot_boundary_nodes(X, ei, title_str)
-    x = X(1, :);
-    y = X(2, :);
-    boundary = X(4, :);
-
-    % Plot edges
-    for e = 1:size(ei, 2)
-        n1 = ei(1, e);
-        n2 = ei(2, e);
-        line([x(n1), x(n2)], [x(n1), x(n2)], [y(n1), y(n2)], 'Color', [0.7 0.7 0.7], 'LineWidth', 0.5);
-    end
-
-    % Plot nodes (color by boundary)
-    hold on;
-    scatter(x(boundary==0), y(boundary==0), 20, 'b', 'filled', 'MarkerFaceAlpha', 0.7);
-    scatter(x(boundary==1), y(boundary==1), 30, 'r', 'filled', 'MarkerFaceAlpha', 0.8);
-    legend('Interior', 'Boundary', 'Location', 'best');
-    xlabel('x'); ylabel('y');
-    title(title_str);
-    axis equal tight;
-    hold off;
-end
-
-function plot_edge_lengths(X, ei)
-    lengths = [];
-    for e = 1:size(ei, 2)
-        n1 = ei(1, e);
-        n2 = ei(2, e);
-        dx = X(1, n1) - X(1, n2);
-        dy = X(2, n1) - X(2, n2);
-        lengths = [lengths; sqrt(dx^2 + dy^2)];
-    end
-
-    histogram(lengths, 30);
-    xlabel('Edge Length'); ylabel('Count');
-    title(sprintf('Edge Length Distribution (mean=%.4f)', mean(lengths)));
-end
-
-function visualize_comparison(samplesDir, targetsDir, options)
-    % Implementation for comparison mode (placeholder)
-    % Would load multiple samples and compare them
-
-    % Get all sample IDs
-    files = dir(fullfile(samplesDir, '*.mat'));
-    sample_ids = {files.name};
-    sample_ids = strrep(sample_ids, '.mat', '');
-
-    % Filter by fixed value
-    fixed = options.fixedValue;
-    if strcmp(options.compareMode, 'angle')
-        mask = contains(sample_ids, sprintf('_ang%03d_', round(fix(fixed))));
-    else
-        mask = contains(sample_ids, sprintf('_tr%03d_', round(fix(fixed))));
-    end
-    filtered = sample_ids(mask);
-    filtered = filtered(1:min(options.nSamples, numel(filtered)));
-
-    % Plot comparison
-    n = numel(filtered);
-    h = figure('Name', options.figName, 'Position', [100 100 800*n, 800]);
-
-    for i = 1:n
-        subplot(1, n, i);
-        try
-            [X_cell, ei_cell, ~, G_mat] = load_graph_dataset({filtered{i}}, samplesDir);
-            X = X_cell{1};
-            ei = ei_cell{1};
-            tr = G_mat(1,1);
-            ang = G_mat(1,2);
-
-            plot_graph_topology(X, ei, sprintf('tr=%.2f, ang=%d°', tr, ang));
-        catch
-            title('Failed to load');
+    subDir = fullfile(rootDir, name);
+    if strcmp(name, sample_id)
+        candidate = fullfile(subDir, 'sheet_shell.inp');
+        if isfile(candidate)
+            inpPath = candidate;
+            return;
         end
     end
 
-    if strcmp(options.compareMode, 'angle')
-        title(sprintf('Varying Angle (tr=%s)', options.fixedValue));
-    else
-        title(sprintf('Varying Thickness Ratio (ang=%s)', options.fixedValue));
+    inpPath = find_inp_recursive(subDir, sample_id);
+    if ~isempty(inpPath)
+        return;
     end
+end
+end
+
+function out = escape_title(text)
+out = strrep(char(string(text)), '_', '\_');
 end
