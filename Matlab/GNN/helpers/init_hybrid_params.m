@@ -19,13 +19,6 @@ params.CNN2.b = zeros(1, 1, cnnChannels(2));
 params.CNN3.W = initializeGlorotConv([3, 3, cnnChannels(2), cnnChannels(3)]);
 params.CNN3.b = zeros(1, 1, cnnChannels(3));
 
-params.GN1.gamma = ones(cnnChannels(1), 1);
-params.GN1.beta  = zeros(cnnChannels(1), 1);
-params.GN2.gamma = ones(cnnChannels(2), 1);
-params.GN2.beta  = zeros(cnnChannels(2), 1);
-params.GN3.gamma = ones(cnnChannels(3), 1);
-params.GN3.beta  = zeros(cnnChannels(3), 1);
-
 graphDim = 2 * hiddenDim * (K + 1);
 cnnDim = 2 * cnnChannels(3);
 fusionIn = graphDim + cnnDim + nGlobal;

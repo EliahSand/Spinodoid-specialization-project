@@ -1,7 +1,7 @@
 %% Hybrid vision GNN to predict spinodoid sheet deformation PCA targets
 
 clear; close all; clc; clear;
-rng(2);
+rng(2, 'twister');
 
 scriptDir = fileparts(mfilename('fullpath'));
 gnnRoot = fileparts(scriptDir);
@@ -11,23 +11,26 @@ addpath(genpath(fullfile(gnnRoot, 'helpers')));
 
 training       = true;
 modelMode      = 'hybrid';   % 'hybrid', 'dense_only', or 'graph_only'
-subsetFraction = 0.1;        % use <1 only for smoke tests
+subsetFraction = 1;        % use <1 only for smoke tests
 
 K              = 4;
 hiddenDim      = 96;
 cnnChannels    = [32, 64, 128];
 fusionDim      = 192;
-dropoutRate    = 0.2;
-batchSize      = 32;
+dropoutRate    = 0.35;
+batchSize      = 16;
 evalBatchSize  = 32;
-maxEpochs      = 180;
+maxEpochs      = 300;
 lr0            = 7e-4;
 decay_rate     = 0.985;
-weight_decay   = 1e-5;
+weight_decay   = 2e-4;
 valFreq        = 5;
-patience       = 12;
+patience       = 10;
 minDeltaR2     = 1e-4;
 gpuUse         = canUseGPU;
+if gpuUse
+    parallel.gpu.rng(2, 'Threefry');
+end
 
 switch modelMode
     case 'hybrid'
@@ -138,7 +141,7 @@ Z_std(Z_std < 1e-8) = 1e-8;
 normStats.Z_mean = Z_mean;
 normStats.Z_std = Z_std;
 
-loss_w = single(sqrt(explained(1:nComp)));
+loss_w = single(explained(1:nComp));
 loss_w = loss_w / mean(loss_w);
 loss_w = reshape(loss_w, nComp, 1, 1);
 normStats.loss_w = loss_w;
@@ -274,7 +277,11 @@ if training
     params = best_params;
     cfg = struct('modelMode', modelMode, 'useGraph', useGraph, 'useDense', useDense, ...
         'K', K, 'hiddenDim', hiddenDim, 'cnnChannels', cnnChannels, 'fusionDim', fusionDim, ...
-        'batchSize', batchSize, 'lr0', lr0, 'maxEpochs', maxEpochs, ...
+        'subsetFraction', subsetFraction, 'dropoutRate', dropoutRate, ...
+        'batchSize', batchSize, 'evalBatchSize', evalBatchSize, ...
+        'lr0', lr0, 'decay_rate', decay_rate, 'weight_decay', weight_decay, ...
+        'maxEpochs', maxEpochs, 'valFreq', valFreq, 'patience', patience, ...
+        'minDeltaR2', minDeltaR2, ...
         'bestEpoch', bestEpoch, 'bestValR2', bestValR2, 'bestValLoss', bestValLoss, ...
         'nComp', nComp, 'nGlobal', nGlobal);
 

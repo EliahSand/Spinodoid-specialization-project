@@ -85,11 +85,11 @@ function h = dense_branch(params, Dense)
 if ~isa(Dense, 'dlarray'), Dense = dlarray(Dense, 'SSCB'); end
 
 z = dlconv(Dense, params.CNN1.W, params.CNN1.b, 'Padding', 'same', 'Stride', 2);
-z = relu(groupnorm(z, 8, params.GN1.gamma, params.GN1.beta));
+z = relu(z);
 z = dlconv(z, params.CNN2.W, params.CNN2.b, 'Padding', 'same', 'Stride', 2);
-z = relu(groupnorm(z, 8, params.GN2.gamma, params.GN2.beta));
+z = relu(z);
 z = dlconv(z, params.CNN3.W, params.CNN3.b, 'Padding', 'same', 'Stride', 2);
-z = relu(groupnorm(z, 8, params.GN3.gamma, params.GN3.beta));
+z = relu(z);
 
 B = size(z, 4);
 C = size(z, 3);
