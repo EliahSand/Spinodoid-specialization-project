@@ -329,7 +329,7 @@ for wi = 1:numel(indices_in_val)
     title(sprintf('%s rank %d  —  Rel err = %.2f%%\n%s', label, wi, ...
         100*per_sample_rel_val(idx_in_val), strrep(sid,'_','\_')), ...
         'FontSize', 9, 'Interpreter', 'tex');
-    xlabel('s (normalized arc length)'); ylabel('u3 (m)');
+    xlabel('s (normalized length)'); ylabel('u3 (m)');
     legend('Location','best');
     grid on;
     fname = fullfile(out_dir, sprintf('%s_%02d_%s.png', lower(label), wi, sid));
