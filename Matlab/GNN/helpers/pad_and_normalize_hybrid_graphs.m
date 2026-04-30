@@ -1,7 +1,7 @@
 function [X_pad, nodeMask, normStats] = pad_and_normalize_hybrid_graphs(X_cell, N_vec, trainMask, normStats)
 %PAD_AND_NORMALIZE_HYBRID_GRAPHS Pad structural graphs for the hybrid model.
 %   Node features are [x, y, radius, boundary]. Coordinates are normalized
-%   per graph to preserve shape in a common [0,1] frame; radius is z-scored
+%   per graph to preserve shape in a common [-1,1] frame; radius is z-scored
 %   with train-split statistics only.
 
 G = numel(N_vec);
@@ -32,7 +32,7 @@ for g = 1:G
     for dim = 1:2
         lo = min(x(dim, :));
         hi = max(x(dim, :));
-        x(dim, :) = (x(dim, :) - lo) / max(hi - lo, eps);
+        x(dim, :) = 2 * ((x(dim, :) - lo) / max(hi - lo, eps)) - 1;
     end
     x(3, :) = (x(3, :) - normStats.r_mean) / normStats.r_std;
     x(4, :) = single(x(4, :) > 0);

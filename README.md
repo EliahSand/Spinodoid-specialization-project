@@ -1,43 +1,34 @@
-# Spinodoid-specialization-project
+# Spinodoid-Master
 Author: Eliah Sand (NTNU, 2025)
 
-End-to-end pipeline for generating periodic spinodoid lattices (cells, sheets, stents), exporting meshes, and running Abaqus solid/shell simulations with mid-plane probes.
+End-to-end pipeline for predicting the midpoint deformation of a spinodoid sheet using hybrid CNN/GNN. 
 
 ## Requierements
+- Matlab
+- Abaqus
 - Numpy
 - Scipy
 - hp5y
 
-## Generation workflow (MATLAB)
 
-- Generators live under `Matlab/` (see Matlab/README.md for details and commands).
-- Each run writes `results/.../run_<timestamp>/` containing:
-  - STL
-  - `run_log.txt` (parameters, thicknesses, spacing, solid fractions)
-  - Mask `.mat` (logical volume + spacing/origin; sheets include `zVoxelThickness`)
-  - `mesh_manifest.json` pointing to the mask/variable
 
-## Mesh conversion (Python)
+# Dataset Creation Pipeline
 
-- Solids (voxel C3D8):  
-  - Single: `python exp/mat_to_inp.py --mat <mask>.mat --var <var> --spacing <L/N>`  
-  - Batch: `python exp/batch_mat_to_inp.py --roots Matlab/results --overwrite`
-- Shells (S4R):  
-  - Single: `python exp/mat_to_shell_inp.py --mat Matlab/results/.../sheet.mat --var sheetMask`  
-  - Batch: `python exp/batch_mat_to_shell_inp.py --roots Matlab/results --overwrite`  
-    Uses `t_base_mm` / `t_spin_mm` from `run_log.txt` when present.
+## Step 1 - Spinodoid generation
 
-## Abaqus runners (CAE noGUI)
+The spinodoid sheet is generated in MATLAB, with controllable parameters. This produces a **.mat** file
 
-- Solids: `abaqus cae noGUI=exp/run_spinodal_static.py -- <solid.inp>`  
-  Batch: `python exp/batch_run_spinodal_solid.py --roots Matlab/results --overwrite`
-- Shells: `abaqus cae noGUI=exp/run_spinodal_shell_static.py -- <shell.inp>`  
-  Batch: `python exp/batch_run_spinodal_shell.py --roots Matlab/results --overwrite`
+## Step 2 - mat to inp conversion
 
-Outputs: ODB + mid-plane CSV/RPT under each run’s `FEA/` or `FEA_shell/`. Use `--dry-run` on batch tools to preview commands.
+The .mat file is converted to a **.inp** file by a python script so it can be submitted for simulation in Abaqus
 
-## Folder map
+## Step 3 - graph generation
 
-- `Matlab/` – generators, helpers, README (usage and file management)
-- `exp/` – converters (`mat_to_inp.py`, `mat_to_shell_inp.py`), runners, batch tools
-- `Matlab/results/` – generated datasets (STL, run_log.txt, mask .mat, manifest, FEA outputs)
+The spinodoid structure is captured and downsampled to a single **structural** graph, using a modified Zhang Zuen thinning algorithm. 
+
+## Step 4 - Abaqus Simulation
+
+The **.inp** file is sumbitted to Abaqus for simulation. Applied displacement on right side nodes, and fixed on the left end. *E=1e6* and *v=0.4* for all samples.
+
+
+

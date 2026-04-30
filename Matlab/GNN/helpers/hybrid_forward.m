@@ -25,6 +25,9 @@ else
     hDense = 0 * repmat(G_global(1, :, :), cnnDim, 1, 1);
 end
 
+hGraph = feature_norm(hGraph);
+hDense = feature_norm(hDense);
+
 if dropoutRate > 0
     keep = dlarray(rand(size(hGraph), 'like', extractdata(hGraph)) > dropoutRate);
     hGraph = hGraph .* keep / (1 - dropoutRate);
@@ -85,15 +88,48 @@ function h = dense_branch(params, Dense)
 if ~isa(Dense, 'dlarray'), Dense = dlarray(Dense, 'SSCB'); end
 
 z = dlconv(Dense, params.CNN1.W, params.CNN1.b, 'Padding', 'same', 'Stride', 2);
-z = relu(z);
+z = norm_relu(z, params, 'GN1', size(params.CNN1.W, 4));
 z = dlconv(z, params.CNN2.W, params.CNN2.b, 'Padding', 'same', 'Stride', 2);
-z = relu(z);
+z = norm_relu(z, params, 'GN2', size(params.CNN2.W, 4));
 z = dlconv(z, params.CNN3.W, params.CNN3.b, 'Padding', 'same', 'Stride', 2);
-z = relu(z);
+z = norm_relu(z, params, 'GN3', size(params.CNN3.W, 4));
 
 B = size(z, 4);
 C = size(z, 3);
 hMean = stripdims(mean(mean(z, 1), 2));
 hMax = stripdims(max(max(z, [], 1), [], 2));
 h = cat(1, reshape(hMean, C, 1, B), reshape(hMax, C, 1, B));
+end
+
+function y = norm_relu(x, params, fieldName, C)
+if isfield(params, fieldName)
+    gn = params.(fieldName);
+    if isfield(gn, 'offset') && isfield(gn, 'scale')
+        offset = reshape(gn.offset, [], 1);
+        scale = reshape(gn.scale, [], 1);
+    elseif isfield(gn, 'beta') && isfield(gn, 'gamma')
+        offset = reshape(gn.beta, [], 1);
+        scale = reshape(gn.gamma, [], 1);
+    else
+        y = relu(x);
+        return;
+    end
+    y = relu(groupnorm(x, group_count(C), offset, scale));
+else
+    y = relu(x);
+end
+end
+
+function y = feature_norm(x)
+mu = mean(x, 1);
+xc = x - mu;
+sigma = sqrt(mean(xc.^2, 1) + 1e-5);
+y = xc ./ sigma;
+end
+
+function g = group_count(C)
+g = min(8, C);
+while mod(C, g) ~= 0
+    g = g - 1;
+end
 end
