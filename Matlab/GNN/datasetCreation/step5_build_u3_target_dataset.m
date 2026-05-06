@@ -4,7 +4,7 @@
 % in data/dataset/samples/ and aggregates QC-passed profiles into
 % data/dataset/targets/u3_targets.mat.
 %
-% Inputs  (per sample):  midpoint_results_shell.csv, meta.json
+% Inputs  (per sample):  midpoint_results_shell.csv
 % Outputs (per sample):  target_u3_profile.mat
 % Outputs (aggregated):  data/dataset/targets/u3_targets.mat
 %                        data/dataset/targets/u3_targets_manifest.json
@@ -26,6 +26,8 @@ LOG_FILE     = fullfile(REPO_ROOT, 'Matlab', 'GNN', 'logs', 'step5_u3_target_log
 N_GRID          = 128;       % resampling resolution
 MIN_RAW_PTS     = 64;        % minimum raw midplane points
 U3_MAX_ABS_M    = 0.5;       % sanity cap: |u3| > 0.5 m triggers fail:u3_out_of_range
+ZERO_U_TOL      = 1e-14;     % all-zero displacement + stress means failed/no-result extraction
+ZERO_STRESS_TOL = 1e-6;
 SCHEMA_VERSION  = 1;
 OVERWRITE       = false;     % set true to reprocess already-completed samples
 
@@ -56,7 +58,7 @@ end
 fprintf('[1/3] Processing %d samples...\n', n_total);
 t_loop_start = tic;
 n_skipped = 0; n_processed = 0; n_failed = 0;
-PRINT_EVERY = 500;
+PRINT_EVERY = 100;
 
 default_result = struct( ...
     'sample_id',  '', ...
@@ -73,18 +75,9 @@ for i = 1:n_total
     sDir = sampleDirs{i};
     [~, folderName] = fileparts(sDir);
 
-    % --- resolve sample_id ---------------------------------------------------
-    metaPath = fullfile(sDir, 'meta.json');
-    if isfile(metaPath)
-        try
-            m = jsondecode(fileread(metaPath));
-            sample_id = m.run_name;
-        catch
-            sample_id = folderName;
-        end
-    else
-        sample_id = folderName;
-    end
+    % Folder name is the canonical sample id. This avoids thousands of
+    % optional metadata reads on synced/cloud folders.
+    sample_id = folderName;
     results(i).sample_id = sample_id;
 
     % --- parse stratification keys from sample_id ---------------------------
@@ -98,7 +91,7 @@ for i = 1:n_total
     if ~OVERWRITE && isfile(outMat)
         % reload qc_status to include in aggregate
         try
-            d = load(outMat);
+            d = load(outMat, 'qc_status', 'u3', 'u2');
             results(i).qc_status = d.qc_status;
             results(i).ok        = strcmp(d.qc_status, 'ok');
             if results(i).ok
@@ -109,10 +102,11 @@ for i = 1:n_total
             results(i).qc_status = 'fail:load_existing_error';
         end
         n_skipped = n_skipped + 1;
-        if mod(i, PRINT_EVERY) == 0
-            fprintf('  [1/3] %d/%d  (skipped=%d processed=%d failed=%d)  %.0fs elapsed\n', ...
-                i, n_total, n_skipped, n_processed, n_failed, toc(t_loop_start));
-        end
+    if mod(i, PRINT_EVERY) == 0
+        fprintf('  [1/3] %d/%d  (skipped=%d processed=%d failed=%d)  %.0fs elapsed\n', ...
+            i, n_total, n_skipped, n_processed, n_failed, toc(t_loop_start));
+        drawnow('limitrate');
+    end
         continue
     end
 
@@ -128,7 +122,7 @@ for i = 1:n_total
     end
 
     try
-        T = readtable(csvPath);
+        M = readmatrix(csvPath, 'NumHeaderLines', 1);
     catch err
         qc = 'fail:csv_parse_error';
         log_entry(logFid, 'FAIL', sample_id, qc, csvPath, err.message);
@@ -140,10 +134,18 @@ for i = 1:n_total
 
     % --- extract columns -----------------------------------------------------
     try
-        Y  = T.Y;
-        Z  = T.Z;
-        U2 = T.U2;
-        U3 = T.U3;
+        if size(M, 2) < 7
+            error('expected at least 7 numeric columns, got %d', size(M, 2));
+        end
+        Y  = M(:, 3);
+        Z  = M(:, 4);
+        U2 = M(:, 6);
+        U3 = M(:, 7);
+        if size(M, 2) >= 14
+            S_Mises = M(:, 14);
+        else
+            S_Mises = [];
+        end
     catch
         qc = 'fail:missing_columns';
         log_entry(logFid, 'FAIL', sample_id, qc, csvPath, 'Expected Y,Z,U2,U3 columns');
@@ -156,6 +158,21 @@ for i = 1:n_total
     % --- QC: NaN / Inf -------------------------------------------------------
     if any(~isfinite(Y)) || any(~isfinite(Z)) || any(~isfinite(U2)) || any(~isfinite(U3))
         qc = 'fail:nan_inf';
+        log_entry(logFid, 'FAIL', sample_id, qc, csvPath, '');
+        results(i).qc_status = qc;
+        n_failed = n_failed + 1;
+        save_per_sample_fail(outMat, sample_id, qc, tr_ratio, ang_deg, run_suffix, SCHEMA_VERSION, created_at);
+        continue
+    end
+
+    % --- QC: failed/no-result Abaqus extraction -------------------------------
+    max_u = max([abs(U2); abs(U3)]);
+    max_stress = 0;
+    if ~isempty(S_Mises)
+        max_stress = max(abs(S_Mises));
+    end
+    if max_u <= ZERO_U_TOL && max_stress <= ZERO_STRESS_TOL
+        qc = 'fail:zero_displacement_and_stress';
         log_entry(logFid, 'FAIL', sample_id, qc, csvPath, '');
         results(i).qc_status = qc;
         n_failed = n_failed + 1;
@@ -232,10 +249,11 @@ for i = 1:n_total
     results(i).u3        = u3_res;
     results(i).u2        = u2_res;
     n_processed = n_processed + 1;
-    if mod(i, PRINT_EVERY) == 0
-        fprintf('  [1/3] %d/%d  (skipped=%d processed=%d failed=%d)  %.0fs elapsed\n', ...
-            i, n_total, n_skipped, n_processed, n_failed, toc(t_loop_start));
-    end
+        if mod(i, PRINT_EVERY) == 0
+            fprintf('  [1/3] %d/%d  (skipped=%d processed=%d failed=%d)  %.0fs elapsed\n', ...
+                i, n_total, n_skipped, n_processed, n_failed, toc(t_loop_start));
+            drawnow('limitrate');
+        end
 end
 fprintf('[1/3] Loop done in %.1fs — skipped=%d  ok=%d  failed=%d\n', ...
     toc(t_loop_start), n_skipped, n_processed, n_failed);
@@ -299,6 +317,8 @@ manifest = struct( ...
     'schema_version',    SCHEMA_VERSION, ...
     'min_raw_pts',       MIN_RAW_PTS, ...
     'u3_max_abs_m',      U3_MAX_ABS_M, ...
+    'zero_u_tol',        ZERO_U_TOL, ...
+    'zero_stress_tol',   ZERO_STRESS_TOL, ...
     'arc_length_basis',  'deformed_curve_YpU2_ZpU3', ...
     'git_sha',           git_sha, ...
     'created_at',        created_at);
@@ -333,7 +353,6 @@ function save_per_sample_with_raw(outMat, sample_id, qc_status, ...
 save(outMat, ...
     'sample_id', 'qc_status', ...
     's_grid', 'u3', 'u2', ...
-    'y_raw', 'z_raw', 'u2_raw', 'u3_raw', 's_raw', ...
     'n_points_raw', 'arc_length_m', ...
     'tr_ratio', 'ang_deg', 'run_suffix', ...
     'schema_version', 'created_at');
