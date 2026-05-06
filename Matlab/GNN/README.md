@@ -12,7 +12,7 @@ Matlab/GNN/data/
   raw/
     samples/      % PSSCone run folders + Abaqus outputs (in-place)
   dataset/
-    samples/      % one folder per run_name with structural graph (.mat) + midpoint target (json)
+    samples/      % one folder per run_name with structural graph (.mat) + midpoint CSV
     splits/
 ```
 
@@ -24,7 +24,7 @@ Matlab/GNN/data/
    - `py -3 Matlab/GNN/datasetCreation/step2_mat_to_shell_inp.py`
 3. Build structural graphs from INP only (pre-deformation):
    - `matlab -batch "run('Matlab/GNN/datasetCreation/step3_batch_structural_graph_from_inp.m')"`
-4. Run Abaqus shell simulations and package midpoint curvature targets:
+4. Run Abaqus shell simulations and package midpoint CSVs:
    - `abaqus cae noGUI=Matlab/GNN/datasetCreation/step4_run_abaqus_shell.py --`
    - Dry-run: `abaqus cae noGUI=Matlab/GNN/datasetCreation/step4_run_abaqus_shell.py -- --dry-run`
    - Package only from existing `midplane_results_shell.csv` files (no Abaqus rerun):
@@ -35,8 +35,6 @@ Matlab/GNN/data/
 - Inside each `(angle, ratio)` group, `rngSeed` is never reused.
 - `step3_batch_structural_graph_from_inp.m` writes one MATLAB file per run:
   `data/dataset/samples/<run_name>/sample.mat` (contains structural graph).
-- `step4_run_abaqus_shell.py` computes and stores midpoint curvature target (`kappa_circle_1_per_m`) in:
-  `data/dataset/samples/<run_name>/target_midpoint_curvature.json`.
 - Step 4 moves `FEA_shell/midplane_results_shell.csv` into:
   `data/dataset/samples/<run_name>/midpoint_results_shell.csv`.
 - Step 4 does not duplicate graph CSV files.

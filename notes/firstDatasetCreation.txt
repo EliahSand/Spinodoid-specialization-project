@@ -61,3 +61,41 @@ Found 6000 graphs. Aggregating...
   5500 / 6000  (362.1 s)
   6000 / 6000  (397.2 s)
 Loaded 6000 graphs in 397.2 s
+
+
+
+PART 2
+
+
+Step 1 complete: generated=12000 failed=0 in 811.16 min.
+
+
+
+step 2
+08:10 - 09:01 (neste dag) = 3245 samples 
+
+
+
+Step 3 (INP-only) complete: ok=6000 skip_no_inp=0 skip_done=6000 fail=0 (81.60 min)
+
+
+step4 
+
+STEP 5
+[1/3] Loop done in 20863.7s — skipped=6116  ok=5881  failed=1
+[2/3] Aggregating QC-passed samples into u3_targets.mat...
+[2/3] Saved aggregated target: /Users/eliahsand/Library/CloudStorage/OneDrive-NTNU/Master 2026/Spinodoid-specialization-project/Matlab/GNN/data/dataset/targets/u3_targets.mat  (11994/11998 QC-passed)
+[3/3] Writing manifest...
+[3/3] Manifest written: /Users/eliahsand/Library/CloudStorage/OneDrive-NTNU/Master 2026/Spinodoid-specialization-project/Matlab/GNN/data/dataset/targets/u3_targets_manifest.json
+Done. 11994/11998 samples passed QC.
+
+
+
+
+Step 6 - split dataset : 1 sekund
+
+Step 7 - fit pca : 1 sekund 
+
+step 8 - verify : 20 sekund
+
+step 9 - Loaded 11995 graphs in 2083.1 s

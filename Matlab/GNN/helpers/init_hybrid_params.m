@@ -14,16 +14,10 @@ end
 
 params.CNN1.W = initializeGlorotConv([5, 5, 4, cnnChannels(1)]);
 params.CNN1.b = zeros(1, 1, cnnChannels(1));
-params.GN1.offset = zeros(cnnChannels(1), 1);
-params.GN1.scale = ones(cnnChannels(1), 1);
 params.CNN2.W = initializeGlorotConv([3, 3, cnnChannels(1), cnnChannels(2)]);
 params.CNN2.b = zeros(1, 1, cnnChannels(2));
-params.GN2.offset = zeros(cnnChannels(2), 1);
-params.GN2.scale = ones(cnnChannels(2), 1);
 params.CNN3.W = initializeGlorotConv([3, 3, cnnChannels(2), cnnChannels(3)]);
 params.CNN3.b = zeros(1, 1, cnnChannels(3));
-params.GN3.offset = zeros(cnnChannels(3), 1);
-params.GN3.scale = ones(cnnChannels(3), 1);
 
 graphDim = 2 * hiddenDim * (K + 1);
 cnnDim = 2 * cnnChannels(3);

@@ -30,7 +30,7 @@ addpath(genpath(fullfile(gnnPrepRoot, 'src')));
 % GNN-specific minimal graph functions (override originals for this pipeline).
 addpath(fullfile(scriptDir, 'gnn_graph'));
 
-OVERWRITE = true;   % set false to skip already-completed samples
+OVERWRITE = false;  % skip already-completed samples
 MAX_TASKS = inf;    % set small integer for raster/detail smoke exports
 
 runDirs = find_run_dirs(samplesRoot);

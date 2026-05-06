@@ -10,6 +10,7 @@ import argparse
 import codecs
 import json
 import os
+import shutil
 import subprocess
 import time
 
@@ -27,6 +28,9 @@ def parse_args():
                    help='Abaqus command (default: abaqus)')
     p.add_argument('--script', default='exp/run_spinodal_shell_static.py',
                    help='Path to the shell runner script.')
+    p.add_argument('--packaged-results-root', default=None,
+                   help='Optional dataset/samples root. If a run already has '
+                        'midpoint_results_shell.csv there, skip it unless --overwrite is used.')
     p.add_argument('--overwrite', action='store_true',
                    help='Re-run even if the target ODB already exists.')
     p.add_argument('--dry-run', action='store_true',
@@ -64,6 +68,31 @@ def existing_odb_path(inp_path):
 def expected_midplane_csv_path(inp_path):
     fea_dir = os.path.join(os.path.dirname(inp_path), 'FEA_shell')
     return os.path.join(fea_dir, 'midplane_results_shell.csv')
+
+
+def expected_packaged_midpoint_csv_path(packaged_results_root, manifest_path):
+    if not packaged_results_root:
+        return None
+    run_name = os.path.basename(os.path.dirname(manifest_path))
+    return os.path.join(os.path.abspath(packaged_results_root), run_name, 'midpoint_results_shell.csv')
+
+
+def package_midplane_csv(packaged_results_root, manifest_path, mid_csv_path, overwrite=False, dry_run=False):
+    if not packaged_results_root or not os.path.isfile(mid_csv_path):
+        return False, None
+    dst = expected_packaged_midpoint_csv_path(packaged_results_root, manifest_path)
+    sample_dir = os.path.dirname(dst)
+    if os.path.isfile(dst):
+        if not overwrite:
+            return False, dst
+        if not dry_run:
+            _safe_remove(dst)
+    if dry_run:
+        return True, dst
+    if not os.path.isdir(sample_dir):
+        os.makedirs(sample_dir)
+    shutil.move(mid_csv_path, dst)
+    return True, dst
 
 
 def _safe_remove(path):
@@ -120,6 +149,7 @@ def main():
     cleaned_runs = 0
     removed_items = 0
     cleanup_skips = 0
+    packaged_runs = 0
 
     for manifest_path in manifests:
         try:
@@ -137,6 +167,12 @@ def main():
             print('[SKIP] %s: shell INP not found.' % inp_path)
             continue
 
+        packaged_csv_path = expected_packaged_midpoint_csv_path(args.packaged_results_root, manifest_path)
+        if packaged_csv_path is not None and os.path.isfile(packaged_csv_path) and not args.overwrite:
+            print('[SKIP] %s: packaged result exists (%s). Use --overwrite to rerun.' %
+                  (inp_path, packaged_csv_path))
+            continue
+
         odb_path = existing_odb_path(inp_path)
         mid_csv_path = expected_midplane_csv_path(inp_path)
         marker_path = None
@@ -145,6 +181,16 @@ def main():
         elif os.path.isfile(odb_path):
             marker_path = odb_path
         if marker_path is not None and not args.overwrite:
+            if marker_path == mid_csv_path and packaged_csv_path is not None:
+                ok, dst = package_midplane_csv(
+                    args.packaged_results_root, manifest_path, mid_csv_path,
+                    overwrite=False, dry_run=args.dry_run)
+                if ok:
+                    packaged_runs += 1
+                    print('[PACK] %s -> %s' % (mid_csv_path, dst))
+                else:
+                    print('[SKIP] %s: result exists (%s). Use --overwrite to rerun.' % (inp_path, marker_path))
+                continue
             print('[SKIP] %s: result exists (%s). Use --overwrite to rerun.' % (inp_path, marker_path))
             continue
 
@@ -168,11 +214,17 @@ def main():
                 cleaned_runs += 1
                 removed_items += n
                 print('[CLEAN] %s: removed %d item(s).' % (fea_shell_dir, n))
+                ok, dst = package_midplane_csv(
+                    args.packaged_results_root, manifest_path, mid_csv_path,
+                    overwrite=args.overwrite, dry_run=False)
+                if ok:
+                    packaged_runs += 1
+                    print('[PACK] %s -> %s' % (mid_csv_path, dst))
 
     batch_dt = time.time() - batch_start
     print('Batch complete in %.1f seconds (%.2f minutes)' % (batch_dt, batch_dt / 60.0))
-    print('Immediate cleanup: cleaned %d run(s), removed %d item(s), skipped %d run(s).' %
-          (cleaned_runs, removed_items, cleanup_skips))
+    print('Immediate cleanup: cleaned %d run(s), removed %d item(s), skipped %d run(s), packaged %d run(s).' %
+          (cleaned_runs, removed_items, cleanup_skips, packaged_runs))
 
 
 if __name__ == '__main__':

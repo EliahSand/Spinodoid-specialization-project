@@ -11,7 +11,7 @@ addpath(genpath(fullfile(gnnRoot, 'helpers')));
 
 training       = true;
 modelMode      = 'hybrid';   % 'hybrid', 'dense_only', or 'graph_only'
-subsetFraction = 0.5;        % use <1 only for smoke tests
+subsetFraction = 1;        % use <1 only for smoke tests
 
 K              = 4;
 hiddenDim      = 96;
@@ -130,10 +130,7 @@ fprintf('maxN=%d  nAll=%d  raster=%dx%d\n', maxN, nAll, size(Dense_all, 1), size
 
 [X_pad, nodeMask, normStats] = pad_and_normalize_hybrid_graphs(allX, allN, trainMask, []);
 A_hat = build_norm_adjacency(allEI, allN, maxN);
-[Dense_input, denseStats] = prepare_dense_raster_inputs(Dense_all, trainMask, []);
-normStats.dense_mean = denseStats.dense_mean;
-normStats.dense_std = denseStats.dense_std;
-normStats.dense_coord_range = denseStats.dense_coord_range;
+Dense_input = prepare_dense_raster_inputs(Dense_all);
 
 %% Standardize PCA targets and globals
 
@@ -285,9 +282,6 @@ if training
         'lr0', lr0, 'decay_rate', decay_rate, 'weight_decay', weight_decay, ...
         'maxEpochs', maxEpochs, 'valFreq', valFreq, 'patience', patience, ...
         'minDeltaR2', minDeltaR2, ...
-        'denseChannelNormalization', 'train_zscore', ...
-        'coordinateRange', normStats.dense_coord_range, ...
-        'cnnGroupNorm', true, 'branchFeatureNorm', true, ...
         'bestEpoch', bestEpoch, 'bestValR2', bestValR2, 'bestValLoss', bestValLoss, ...
         'nComp', nComp, 'nGlobal', nGlobal);
 
@@ -333,7 +327,7 @@ valEpochs = find(val_losses > 0);
 hLoss = figure;
 plot(train_losses, '-r', 'LineWidth', 1.5); hold on;
 plot(valEpochs, val_losses(valEpochs), '-b', 'LineWidth', 1.5);
-xlabel('Epoch'); ylabel('Loss');
+xlabel('Epoch'); ylabel('Weighted MSE (standardized PCA)');
 legend('Train', 'Validation', 'Location', 'northeast');
 title(sprintf('Hybrid training curve (%s)', modelMode));
 exportgraphics(hLoss, fullfile(bestDir, 'loss_curve.png'), 'Resolution', 150);

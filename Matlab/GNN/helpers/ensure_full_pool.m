@@ -1,8 +1,8 @@
 function pool = ensure_full_pool()
     c = parcluster('local');
-    %targetWorkers = min(8, c.NumWorkers);  % if you dont want to use
+    targetWorkers = min(6, c.NumWorkers);  % if you dont want to use
     %everything the computer has
-    targetWorkers = c.NumWorkers;
+    %targetWorkers = c.NumWorkers;
 
     pool = gcp('nocreate');
 
