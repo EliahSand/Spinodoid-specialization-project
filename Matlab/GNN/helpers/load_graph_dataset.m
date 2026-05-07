@@ -9,7 +9,7 @@ function [X_cell, ei_cell, N_vec] = load_graph_dataset(sample_ids, samplesDir)
 %   (loaded once per session via a persistent cache). Otherwise falls back
 %   to loading individual sample.mat files.
 
-persistent agg aggMap   % cached across calls in the same MATLAB session
+persistent agg aggMap aggFileCached   % cached across calls in the same MATLAB session
 
 G = numel(sample_ids);
 
@@ -19,11 +19,12 @@ aggFile = fullfile(fileparts(samplesDir), 'targets', 'graphs_all.mat');
 
 if isfile(aggFile)
 
-    % Load aggregate once per session
-    if isempty(agg)
+    % Load aggregate once per path per session.
+    if isempty(agg) || isempty(aggFileCached) || ~strcmp(aggFileCached, aggFile)
         fprintf('load_graph_dataset: loading aggregate from %s\n', aggFile);
         agg = load(aggFile, 'sample_ids', 'X_cell', 'ei_cell', 'N_vec');
         aggMap = containers.Map(agg.sample_ids, num2cell(1:numel(agg.sample_ids)));
+        aggFileCached = aggFile;
     end
 
     X_cell  = cell(G, 1);

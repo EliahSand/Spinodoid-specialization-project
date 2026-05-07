@@ -1,7 +1,8 @@
 function [figModel, figFull] = visualize_graph(sample_id, samplesDir, varargin)
 %VISUALIZE_GRAPH Show the two graph views that matter for one GNN sample.
-%   Tab 1: reduced input graph exactly as load_graph_dataset gives it to the
-%   model: node features [x, y, radius] and edge_index.
+%   Tab 1: reduced input graph exactly as the active model loader gives it
+%   to the model: node features [x, y, radius, boundary] and edge_index for
+%   hybrid graphs, or [x, y, radius] for legacy graph-only data.
 %
 %   Tab 2: full reference graph for the same sample, rebuilt from the raw
 %   sheet_shell.inp with the gnn_prep_spinodal fullGraph builder.
@@ -26,9 +27,7 @@ end
 addpath(gnnPrepRoot);
 addpath(genpath(fullfile(gnnPrepRoot, 'src')));
 
-[X_cell, ei_cell] = load_graph_dataset({sample_id}, samplesDir);
-X = double(X_cell{1});
-EI = double(ei_cell{1});
+[X, EI, featureNames] = load_model_input_graph(sample_id, samplesDir);
 
 assert_model_graph_schema(X, EI, sample_id);
 
@@ -60,8 +59,8 @@ plot_graph_mesh(fullGraph, ...
     'YLabel', 'y');
 
 fprintf('Sample: %s\n', sample_id);
-fprintf('GNN input: %d nodes, %d edges, features [x y radius]\n', ...
-    size(X, 2), size(EI, 2));
+fprintf('GNN input: %d nodes, %d edges, features [%s]\n', ...
+    size(X, 2), size(EI, 2), strjoin(featureNames, ' '));
 fprintf('Full graph: %d nodes, %d edges, source %s\n', ...
     fullGraph.num_nodes, size(fullGraph.edges_local, 1), inpPath);
 end
@@ -69,7 +68,7 @@ end
 function samplesDir = default_samples_dir()
 scriptDir = fileparts(mfilename('fullpath'));
 gnnRoot = fullfile(fileparts(scriptDir), 'GNN');
-samplesDir = fullfile(gnnRoot, 'data', 'dataset', 'samples');
+samplesDir = fullfile(gnnRoot, 'data', 'dataset_hybrid', 'samples');
 end
 
 function [gnnRoot, repoRoot] = infer_roots(samplesDir)
@@ -79,10 +78,30 @@ gnnRoot = fileparts(dataDir);
 repoRoot = fileparts(fileparts(gnnRoot));
 end
 
+function [X, EI, featureNames] = load_model_input_graph(sample_id, samplesDir)
+if is_hybrid_samples_dir(samplesDir)
+    [X_cell, ei_cell] = load_hybrid_graph_dataset({sample_id}, samplesDir);
+    X = double(X_cell{1});
+    EI = double(ei_cell{1});
+    featureNames = {'x', 'y', 'radius', 'boundary'};
+else
+    [X_cell, ei_cell] = load_graph_dataset({sample_id}, samplesDir);
+    X = double(X_cell{1});
+    EI = double(ei_cell{1});
+    featureNames = {'x', 'y', 'radius'};
+end
+end
+
+function tf = is_hybrid_samples_dir(samplesDir)
+normalized = strrep(char(samplesDir), '\', filesep);
+parts = strsplit(normalized, filesep);
+tf = any(strcmp(parts, 'dataset_hybrid'));
+end
+
 function assert_model_graph_schema(X, EI, sample_id)
-if size(X, 1) ~= 3
+if ~ismember(size(X, 1), [3, 4])
     error('visualize_graph:BadModelFeatures', ...
-        'Expected model features for "%s" to be 3xN: [x; y; radius]. Got %dx%d.', ...
+        'Expected model features for "%s" to be 3xN or 4xN. Got %dx%d.', ...
         sample_id, size(X, 1), size(X, 2));
 end
 if size(EI, 1) ~= 2
@@ -100,6 +119,11 @@ function plot_model_input_graph(ax, X, EI)
 x = X(1, :).';
 y = X(2, :).';
 r = X(3, :).';
+if size(X, 1) >= 4
+    boundary = logical(X(4, :).');
+else
+    boundary = false(size(x));
+end
 
 hold(ax, 'on');
 draw_edges(ax, x, y, EI, [0.72, 0.72, 0.72], 0.45);
@@ -109,6 +133,10 @@ draw_radius_disks(ax, x(validDisks), y(validDisks), r(validDisks));
 if any(~validDisks)
     scatter(ax, x(~validDisks), y(~validDisks), 12, [0.20, 0.42, 0.85], ...
         'filled', 'MarkerEdgeColor', 'none');
+end
+if any(boundary)
+    scatter(ax, x(boundary), y(boundary), 18, [0.90, 0.20, 0.18], ...
+        'o', 'LineWidth', 0.8);
 end
 
 axis(ax, 'equal');

@@ -6,13 +6,13 @@ function [X_cell, ei_cell, N_vec, G_mat, Dense] = load_hybrid_graph_dataset(samp
 %   G_mat      - G x 2 [tr_ratio, ang_deg]
 %   Dense      - H x W x 2 x G uint8 [occupancy, boundary]
 
-persistent agg aggMap hasDense hasGlobals
+persistent agg aggMap hasDense hasGlobals aggFileCached
 
 G = numel(sample_ids);
 aggFile = fullfile(fileparts(samplesDir), 'targets', 'graphs_all.mat');
 
 if isfile(aggFile)
-    if isempty(agg)
+    if isempty(agg) || isempty(aggFileCached) || ~strcmp(aggFileCached, aggFile)
         fprintf('load_hybrid_graph_dataset: loading aggregate from %s\n', aggFile);
         vars = who('-file', aggFile);
         hasDense = ismember('Dense_cell', vars);
@@ -24,6 +24,7 @@ if isfile(aggFile)
         end
         agg = load(aggFile, loadVars{:});
         aggMap = containers.Map(agg.sample_ids, num2cell(1:numel(agg.sample_ids)));
+        aggFileCached = aggFile;
     end
 
     X_cell  = cell(G, 1);

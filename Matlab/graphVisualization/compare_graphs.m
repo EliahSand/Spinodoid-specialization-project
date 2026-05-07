@@ -5,7 +5,7 @@
 scriptDir = fileparts(mfilename('fullpath'));
 addpath(scriptDir);
 gnnRoot = fullfile(fileparts(scriptDir), 'GNN');
-samplesDir = fullfile(gnnRoot, 'data', 'dataset', 'samples');
+samplesDir = fullfile(gnnRoot, 'data', 'dataset_hybrid', 'samples');
 
 sample_id = 'sheetCone_tr100_ang030_lamellar_N128_1x1';
 visualize_graph(sample_id, samplesDir);

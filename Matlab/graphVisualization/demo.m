@@ -1,12 +1,12 @@
 %% Demo: visualize one GNN graph sample
 % Produces exactly two figures:
-%   1. the reduced input graph exactly as the GNN loader provides it
+%   1. the reduced input graph exactly as the active model loader provides it
 %   2. the matching full reference graph from sheet_shell.inp
 
 scriptDir = fileparts(mfilename('fullpath'));
 addpath(scriptDir);
 gnnRoot = fullfile(fileparts(scriptDir), 'GNN');
-samplesDir = fullfile(gnnRoot, 'data', 'dataset', 'samples');
+samplesDir = fullfile(gnnRoot, 'data', 'dataset_hybrid', 'samples');
 
 if ~isfolder(samplesDir)
     error('Samples directory not found: %s', samplesDir);

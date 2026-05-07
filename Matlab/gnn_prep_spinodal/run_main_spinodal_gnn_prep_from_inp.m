@@ -9,8 +9,7 @@ addpath(genpath(fullfile(moduleRoot, 'src')));
 
 % Example defaults (project-specific sample).
 matlabRoot = fileparts(moduleRoot);
-inpPath = fullfile(matlabRoot, 'results', 'sheets', 'lamellar', ...
-    'sheetCone_tr50_ang045_lamellar_N128_1x1', 'sheet_shell.inp');
+inpPath = fullfile(matlabRoot, 'GNN/data/raw/samples/tr100/ang030/sheetCone_tr100_ang030_lamellar_N128_1x1/sheet_shell.inp');
 
 outputs = main_spinodal_gnn_prep_from_inp(inpPath, ...
     'ElsetName', 'SPINODAL_SHELL', ...
