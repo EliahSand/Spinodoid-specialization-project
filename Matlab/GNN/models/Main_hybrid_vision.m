@@ -11,16 +11,16 @@ addpath(genpath(fullfile(gnnRoot, 'helpers')));
 
 training       = true;
 modelMode      = 'hybrid';   % 'hybrid', 'dense_only', or 'graph_only'
-subsetFraction = 1;        % use <1 only for smoke tests
+subsetFraction = 1;        % fraction of dataset
 
 K              = 4;
 hiddenDim      = 96;
 cnnChannels    = [32, 64, 128];
 fusionDim      = 192;
 dropoutRate    = 0.35;
-batchSize      = 16;
+batchSize      = 24;        %32 blir for mye lokalt
 evalBatchSize  = 32;
-maxEpochs      = 300;
+maxEpochs      = 200;
 lr0            = 7e-4;
 decay_rate     = 0.985;
 weight_decay   = 2e-4;
