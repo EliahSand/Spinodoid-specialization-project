@@ -1,4 +1,4 @@
-function structGraph = extract_structural_graph_gnn(fullGraph, varargin)
+function [structGraph, skeletonGraph, debugData] = extract_structural_graph_gnn(fullGraph, varargin)
 %EXTRACT_STRUCTURAL_GRAPH_GNN Minimal variant of extract_structural_graph for GNN export.
 %
 % structGraph = EXTRACT_STRUCTURAL_GRAPH_GNN(fullGraph, ...)
@@ -96,6 +96,23 @@ function structGraph = extract_structural_graph_gnn(fullGraph, varargin)
 
     structGraph = compress_skeleton_graph(skeletonGraph, opts.DetailLevel);
     structGraph = cleanup_structural_graph(structGraph, skeletonGraph);
+
+    if nargout >= 3
+        debugData = struct();
+        debugData.x_grid = xVals;
+        debugData.y_grid = yVals;
+        debugData.node_at_grid = nodeAt;
+        debugData.occupancy_mask = occMask;
+        debugData.boundary_mask = boundaryMask;
+        debugData.boundary_step_distance = boundaryStepDistance;
+        debugData.component_at_grid = componentAt;
+        debugData.radius_map = radiusMap;
+        debugData.spacing_info = struct( ...
+            'dx', median_or_nan(diff(sort(xVals(:)))), ...
+            'dy', median_or_nan(diff(sort(yVals(:)))), ...
+            'h', estimate_characteristic_spacing(xy, fullGraph.edges_local));
+        debugData.skeleton_mask = skelMask;
+    end
 end
 
 % -------------------------------------------------------------------------
