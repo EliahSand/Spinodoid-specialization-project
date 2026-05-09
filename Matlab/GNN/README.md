@@ -30,38 +30,6 @@ Matlab/GNN/data/
    - Package only from existing `midplane_results_shell.csv` files (no Abaqus rerun):
      `abaqus cae noGUI=Matlab/GNN/datasetCreation/step4_run_abaqus_shell.py -- --package-only`
 
-## Optional MAT/Spline Graph v4
-
-The side-by-side MAT/spline control-point graph representation writes to
-`Matlab/GNN/data/dataset_mat_spline` and does not overwrite the v3 hybrid
-graphs in `dataset_hybrid`.
-
-```matlab
-matlab -batch "run('Matlab/GNN/datasetCreation/step3_batch_mat_spline_graph_from_inp.m')"
-matlab -batch "run('Matlab/GNN/datasetCreation/step9_aggregate_mat_spline_graphs.m')"
-```
-
-To train the hybrid model on this graph input, set:
-
-```matlab
-graphDatasetName = 'dataset_mat_spline';
-```
-
-in `Matlab/GNN/models/Main_hybrid_vision.m`.
-
-To visualize one v4 graph in the same tabbed style as `graphVisualization`:
-
-```matlab
-addpath('Matlab/graphVisualization')
-run('Matlab/graphVisualization/demo_mat_spline.m')
-```
-
-`demo_mat_spline.m` automatically opens the first available v4 sample. To
-open a specific run folder, call `visualize_mat_spline_graph('<run_name>')`.
-For v4 samples, the viewer adds a `MAT envelope` tab that densely samples the
-stored spline branches and reports reconstruction IoU, missing coverage, extra
-coverage, and one-sided error.
-
 ## Important policy
 
 - Inside each `(angle, ratio)` group, `rngSeed` is never reused.

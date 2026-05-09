@@ -1,40 +1,29 @@
 function [X_cell, ei_cell, N_vec, G_mat, Dense] = load_hybrid_graph_dataset(sample_ids, samplesDir)
 %LOAD_HYBRID_GRAPH_DATASET Load graph + dense raster inputs for hybrid models.
-%   X_cell{g}  - F x Ng single. Schema v3 uses [x; y; radius; boundary];
-%                schema v4 MAT/spline graphs can use more node features.
+%   X_cell{g}  - F x Ng single, expected [x; y; radius; boundary]
 %   ei_cell{g} - 2 x Eg double edge index
 %   N_vec(g)   - node count
 %   G_mat      - G x 2 [tr_ratio, ang_deg]
 %   Dense      - H x W x 2 x G uint8 [occupancy, boundary]
 
-persistent agg aggMap hasDense hasGlobals featureNames aggFileCached
+persistent agg aggMap hasDense hasGlobals
 
 G = numel(sample_ids);
 aggFile = fullfile(fileparts(samplesDir), 'targets', 'graphs_all.mat');
 
 if isfile(aggFile)
-    if isempty(agg) || isempty(aggFileCached) || ~strcmp(aggFileCached, aggFile)
+    if isempty(agg)
         fprintf('load_hybrid_graph_dataset: loading aggregate from %s\n', aggFile);
         vars = who('-file', aggFile);
         hasDense = ismember('Dense_cell', vars);
         hasGlobals = ismember('TR_vec', vars) && ismember('ANG_vec', vars);
-        hasFeatureNames = ismember('feature_names', vars);
         loadVars = {'sample_ids', 'X_cell', 'ei_cell', 'N_vec'};
         if hasDense, loadVars{end+1} = 'Dense_cell'; end %#ok<AGROW>
         if hasGlobals
             loadVars = [loadVars, {'TR_vec', 'ANG_vec'}]; %#ok<AGROW>
         end
-        if hasFeatureNames
-            loadVars{end+1} = 'feature_names'; %#ok<AGROW>
-        end
         agg = load(aggFile, loadVars{:});
         aggMap = containers.Map(agg.sample_ids, num2cell(1:numel(agg.sample_ids)));
-        if isfield(agg, 'feature_names')
-            featureNames = agg.feature_names;
-        else
-            featureNames = {};
-        end
-        aggFileCached = aggFile;
     end
 
     X_cell  = cell(G, 1);
@@ -68,7 +57,7 @@ if isfile(aggFile)
             Dense(:, :, :, g) = uint8(agg.Dense_cell{aggMap(sample_ids{g})});
         end
     else
-        Dense = rasterize_from_graphs(X_cell, 128, featureNames);
+        Dense = rasterize_from_graphs(X_cell, 128);
     end
 else
     fprintf('load_hybrid_graph_dataset: graphs_all.mat not found - loading %d files individually.\n', G);
@@ -77,7 +66,6 @@ else
     N_vec   = zeros(G, 1);
     G_mat   = zeros(G, 2);
     Dense   = [];
-    featureNames = {};
 
     for g = 1:G
         sid = sample_ids{g};
@@ -91,9 +79,6 @@ else
         ei_cell{g} = double(gd.edge_index);
         N_vec(g) = gd.num_nodes;
         G_mat(g, :) = [gd.tr_ratio, gd.ang_deg];
-        if isempty(featureNames) && isfield(gd, 'feature_names')
-            featureNames = gd.feature_names;
-        end
         if isfield(d, 'dense_data') && isfield(d.dense_data, 'raster')
             if isempty(Dense)
                 r = d.dense_data.raster;
@@ -105,9 +90,9 @@ else
     end
 
     if isempty(Dense)
-        Dense = rasterize_from_graphs(X_cell, 128, featureNames);
+        Dense = rasterize_from_graphs(X_cell, 128);
     elseif any(~denseSeen)
-        fallbackDense = rasterize_from_graphs(X_cell, size(Dense, 1), featureNames);
+        fallbackDense = rasterize_from_graphs(X_cell, size(Dense, 1));
         Dense(:, :, :, ~denseSeen) = fallbackDense(:, :, :, ~denseSeen);
     end
 end
@@ -121,18 +106,13 @@ if size(X, 1) < 4
 end
 end
 
-function Dense = rasterize_from_graphs(X_cell, gridSize, featureNames)
+function Dense = rasterize_from_graphs(X_cell, gridSize)
 G = numel(X_cell);
 Dense = zeros(gridSize, gridSize, 2, G, 'uint8');
-boundaryRow = infer_boundary_row(featureNames, X_cell);
 for g = 1:G
     X = X_cell{g};
     xy = double(X(1:2, :).');
-    if boundaryRow > 0 && size(X, 1) >= boundaryRow
-        boundary = logical(X(boundaryRow, :).');
-    else
-        boundary = false(size(xy, 1), 1);
-    end
+    boundary = logical(X(4, :).');
     xLo = min(xy(:, 1)); xHi = max(xy(:, 1));
     yLo = min(xy(:, 2)); yHi = max(xy(:, 2));
     cols = 1 + round((xy(:, 1) - xLo) / max(xHi - xLo, eps) * (gridSize - 1));
@@ -143,21 +123,6 @@ for g = 1:G
     Dense(idx + (g - 1) * gridSize * gridSize * 2) = 1;
     bidx = idx(boundary);
     Dense(bidx + gridSize * gridSize + (g - 1) * gridSize * gridSize * 2) = 1;
-end
-end
-
-function row = infer_boundary_row(featureNames, X_cell)
-row = 0;
-if ~isempty(featureNames)
-    names = string(featureNames);
-    hit = find(strcmpi(names, "boundary") | strcmpi(names, "is_boundary"), 1);
-    if ~isempty(hit)
-        row = hit;
-        return;
-    end
-end
-if ~isempty(X_cell) && size(X_cell{1}, 1) == 4
-    row = 4;
 end
 end
 

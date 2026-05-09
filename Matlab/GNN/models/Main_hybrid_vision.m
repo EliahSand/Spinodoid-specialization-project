@@ -11,17 +11,16 @@ addpath(genpath(fullfile(gnnRoot, 'helpers')));
 
 training       = true;
 modelMode      = 'hybrid';   % 'hybrid', 'dense_only', or 'graph_only'
-graphDatasetName = 'dataset_hybrid'; % 'dataset_hybrid' (v3) or 'dataset_mat_spline' (v4)
-subsetFraction = 1;        % fraction of dataset
+subsetFraction = 1;        % use <1 only for smoke tests
 
 K              = 4;
 hiddenDim      = 96;
 cnnChannels    = [32, 64, 128];
-fusionDim      = 192;        
+fusionDim      = 192;
 dropoutRate    = 0.35;
-batchSize      = 24;        %32 blir for mye lokalt
+batchSize      = 16;
 evalBatchSize  = 32;
-maxEpochs      = 200;
+maxEpochs      = 300;
 lr0            = 7e-4;
 decay_rate     = 0.985;
 weight_decay   = 2e-4;
@@ -47,8 +46,8 @@ end
 runName = sprintf('%s_%s', datestr(now, 'yyyymmdd_HHMMSS'), modelMode);
 
 targetsDir = fullfile(gnnRoot, 'data', 'dataset', 'targets');
-samplesDir = fullfile(gnnRoot, 'data', graphDatasetName, 'samples');
-hybridTargetsDir = fullfile(gnnRoot, 'data', graphDatasetName, 'targets');
+samplesDir = fullfile(gnnRoot, 'data', 'dataset_hybrid', 'samples');
+hybridTargetsDir = fullfile(gnnRoot, 'data', 'dataset_hybrid', 'targets');
 bestDir = fullfile(scriptDir, 'best', runName);
 if ~isfolder(bestDir), mkdir(bestDir); end
 
@@ -58,7 +57,7 @@ progressFile = fullfile(bestDir, 'training_log.mat');
 if ~isfile(fullfile(hybridTargetsDir, 'graphs_all.mat'))
     error('Main_hybrid_vision:missingHybridGraphs', ...
         ['Hybrid graphs not found. Run step3_batch_structural_graph_from_inp.m, ', ...
-         'or step3_batch_mat_spline_graph_from_inp.m for v4, then the matching step9 aggregate script to create %s.'], ...
+         'then step9_aggregate_graphs.m to create %s.'], ...
         fullfile(hybridTargetsDir, 'graphs_all.mat'));
 end
 
@@ -277,7 +276,6 @@ if training
 
     params = best_params;
     cfg = struct('modelMode', modelMode, 'useGraph', useGraph, 'useDense', useDense, ...
-        'graphDatasetName', graphDatasetName, ...
         'K', K, 'hiddenDim', hiddenDim, 'cnnChannels', cnnChannels, 'fusionDim', fusionDim, ...
         'subsetFraction', subsetFraction, 'dropoutRate', dropoutRate, ...
         'batchSize', batchSize, 'evalBatchSize', evalBatchSize, ...
