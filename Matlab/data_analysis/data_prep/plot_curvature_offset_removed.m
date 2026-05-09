@@ -77,8 +77,12 @@ end
 grid(ax, 'on');
 xlabel(ax, 'Y');
 ylabel(ax, '\DeltaZ (baseline referenced, vertical offset removed)');
-title(ax, sprintf('Curvature comparison (baseline + vertical shift removed) — %s | %s', ratioLabel, thetaLabel), ...
-    'FontWeight', 'bold', 'Interpreter', 'tex');
+if isempty(ratioLabel)
+    titleStr = sprintf('Curvature comparison (baseline + vertical shift removed) — %s', thetaLabel);
+else
+    titleStr = sprintf('Curvature comparison (baseline + vertical shift removed) — %s | %s', ratioLabel, thetaLabel);
+end
+title(ax, titleStr, 'FontWeight', 'bold', 'Interpreter', 'tex');
 legend(ax, 'Location', 'best');
 
 if ismember('X', solid.Properties.VariableNames)

@@ -99,3 +99,38 @@ Step 7 - fit pca : 1 sekund
 step 8 - verify : 20 sekund
 
 step 9 - Loaded 11995 graphs in 2083.1 s
+
+
+
+
+
+
+
+___________________
+SPLINE SETUP
+
+Step 3 MAT/spline v4 complete: ok=11995 skip_no_inp=0 skip_done=0 fail=0 (70.82 min)
+Loaded 11995 MAT/spline graphs in 2320.8 s.  (STEP 9)
+
+
+--------------------------------
+
+Junction SETUP
+ 
+Step 3 v5 complete: ok=11994 skip_no_inp=0 skip_done=1 fail=0 (169.32 min)
+
+step 9 Loaded 11995 graphs in 2101.2 s
+
+
+
+
+
+
+
+
+---------------------
+
+modifisert v3 (original)
+
+step 9 Loaded 11995 graphs in 3384.8 s
+

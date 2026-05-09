@@ -65,8 +65,12 @@ grid(ax, 'on');
 axis(ax, 'equal');
 xlabel(ax, 'Y  (mm)');
 ylabel(ax, 'Z (mm)');
-title(ax, sprintf('Mid-plane YZ curvature — %s | %s', ratioLabel, thetaLabel), ...
-    'FontWeight', 'bold', 'Interpreter', 'tex');
+if isempty(ratioLabel)
+    titleStr = sprintf('Mid-plane YZ curvature — %s', thetaLabel);
+else
+    titleStr = sprintf('Mid-plane YZ curvature — %s | %s', ratioLabel, thetaLabel);
+end
+title(ax, titleStr, 'FontWeight', 'bold', 'Interpreter', 'tex');
 legend(ax, 'Location', 'best');
 
 if ismember('X', solid.Properties.VariableNames)
@@ -74,13 +78,6 @@ if ismember('X', solid.Properties.VariableNames)
     subtitle(ax, sprintf('X = %.4g mm (%d nodes)', xVal, numel(Y0s)));
 else
     subtitle(ax, sprintf('%d nodes', numel(Y0s)));
-end
-
-if isfield(opts.CurvatureCheck, 'solid') && isfield(opts.CurvatureCheck, 'shell')
-    txt = compose_curvature_text(opts.CurvatureCheck);
-    text(ax, 0.02, 0.98, txt, 'Units', 'normalized', ...
-        'VerticalAlignment', 'top', 'HorizontalAlignment', 'left', ...
-        'BackgroundColor', 'w', 'Margin', 6, 'Interpreter', 'none', 'FontSize', 9);
 end
 
 exportgraphics(fig, fullfile(outDir, 'curvature_yz_overlay.png'), 'Resolution', 300);
@@ -93,18 +90,6 @@ if isnan(thetaDeg)
     out = '\theta = N/A';
 else
     out = sprintf('\\theta = %d°', round(thetaDeg));
-end
-end
-
-function txt = compose_curvature_text(cc)
-line1 = sprintf('kappa(solid)=%.4g 1/m  R=%.4g m', cc.solid.kappaCircle, cc.solid.radiusCircle);
-line2 = sprintf('kappa(shell)=%.4g 1/m  R=%.4g m', cc.shell.kappaCircle, cc.shell.radiusCircle);
-if isfield(cc, 'theory') && ~isnan(cc.theory.kappa)
-    line3 = sprintf('kappa(theory)=%.4g 1/m  R=%.4g m', cc.theory.kappa, cc.theory.radius);
-    line4 = sprintf('relErr solid=%.3g  shell=%.3g', cc.solid.RelErrTheory, cc.shell.RelErrTheory);
-    txt = sprintf('%s\n%s\n%s\n%s', line1, line2, line3, line4);
-else
-    txt = sprintf('%s\n%s', line1, line2);
 end
 end
 

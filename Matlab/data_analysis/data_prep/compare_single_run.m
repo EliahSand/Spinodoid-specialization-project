@@ -101,7 +101,7 @@ end
 end
 
 function [trLabel, thetaDeg] = parse_run_tags(runName, runFolder)
-trLabel = runName;
+trLabel = '';
 thetaDeg = NaN;
 trToken = regexp(runName, 'tr\d+', 'match', 'once');
 if ~isempty(trToken)

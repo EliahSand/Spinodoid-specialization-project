@@ -32,7 +32,7 @@ cfg.tilesXY      = [2 3];       %tiling for periodicity
 cfg.add_outer_skin_vox = 0;
 cfg.slice_count  = 8;           %builds 2D spinodal patterm for shell by averaging top "slice_count" for 3D field, then majority thresholding
 cfg.align_with_cube = true;
-cfg.lamellarAngleDeg = 30;       %lamellar angle to x-axis
+cfg.lamellarAngleDeg = 60;       %lamellar angle to x-axis
 cfg.resultsRoot  = [];
 
 fields = fieldnames(cfg);

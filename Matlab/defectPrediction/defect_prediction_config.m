@@ -53,6 +53,106 @@ for ai = 1:nAng
     end
 end
 
+% ----------------------------------------------------------------
+% Local-defect sweep (cracks + holes, no GRF).
+% Builds cfg.local_cases: 35 cases = 5 baselines + 15 cracks + 15 holes.
+% ----------------------------------------------------------------
+crackSev.length_m  = 15e-3;
+crackSev.theta_deg = 0;
+crackSev.width_m   = 1e-3;   % 3 voxels wide at N=128, L=40e-3
+
+holeSev.radius_m = 3e-3;
+holeSev.count    = 1;
+
+% Canonical positions stored as fractions of L.
+canonPos = struct( ...
+    'name', {'center',    'quarter',    'mid_edge_x', 'mid_edge_y'}, ...
+    'frac', {[0.50 0.50], [0.25 0.25], [0.50 0.00],  [0.00 0.50]});
+
+crackPosNames = {'center', 'quarter', 'mid_edge_x'};
+holePosNames  = {'center', 'quarter', 'mid_edge_y'};
+
+nLocalPerAngle = 1 + numel(crackPosNames) + numel(holePosNames);  % 7
+nLocalTotal    = nAng * nLocalPerAngle;  % 35
+
+local_cases = struct( ...
+    'case_name',          cell(nLocalTotal, 1), ...
+    'case_dir',           cell(nLocalTotal, 1), ...
+    'angle_tag',          cell(nLocalTotal, 1), ...
+    'lamellar_angle_deg', cell(nLocalTotal, 1), ...
+    'defect_type',        cell(nLocalTotal, 1), ...
+    'position_name',      cell(nLocalTotal, 1), ...
+    'position_xy',        cell(nLocalTotal, 1), ...
+    'severity',           cell(nLocalTotal, 1), ...
+    'local_defects',      cell(nLocalTotal, 1));
+
+k = 0;
+for ai = 1:nAng
+    ang    = lamellarAngles(ai);
+    angTag = sprintf('lam%03d', ang);
+
+    % Baseline (no defect)
+    k = k + 1;
+    local_cases(k).case_name          = [angTag '_baseline'];
+    local_cases(k).case_dir           = fullfile(resultsRoot, angTag, 'baseline');
+    local_cases(k).angle_tag          = angTag;
+    local_cases(k).lamellar_angle_deg = ang;
+    local_cases(k).defect_type        = 'baseline';
+    local_cases(k).position_name      = 'none';
+    local_cases(k).position_xy        = [];
+    local_cases(k).severity           = struct();
+    local_cases(k).local_defects      = struct([]);
+
+    % Cracks at 3 positions
+    for pi = 1:numel(crackPosNames)
+        pName = crackPosNames{pi};
+        pIdx  = find(strcmp({canonPos.name}, pName), 1);
+        pXY   = canonPos(pIdx).frac * baseParams.L;
+
+        ds          = struct();
+        ds.type     = 'crack';
+        ds.position = pXY;
+        ds.length_m  = crackSev.length_m;
+        ds.theta_deg = crackSev.theta_deg;
+        ds.width_m   = crackSev.width_m;
+
+        k = k + 1;
+        local_cases(k).case_name          = [angTag '_crack_' pName];
+        local_cases(k).case_dir           = fullfile(resultsRoot, angTag, ['crack_' pName]);
+        local_cases(k).angle_tag          = angTag;
+        local_cases(k).lamellar_angle_deg = ang;
+        local_cases(k).defect_type        = 'crack';
+        local_cases(k).position_name      = pName;
+        local_cases(k).position_xy        = pXY;
+        local_cases(k).severity           = crackSev;
+        local_cases(k).local_defects      = ds;
+    end
+
+    % Holes at 3 positions
+    for pi = 1:numel(holePosNames)
+        pName = holePosNames{pi};
+        pIdx  = find(strcmp({canonPos.name}, pName), 1);
+        pXY   = canonPos(pIdx).frac * baseParams.L;
+
+        ds          = struct();
+        ds.type     = 'hole';
+        ds.position = pXY;
+        ds.radius_m  = holeSev.radius_m;
+        ds.count     = holeSev.count;
+
+        k = k + 1;
+        local_cases(k).case_name          = [angTag '_hole_' pName];
+        local_cases(k).case_dir           = fullfile(resultsRoot, angTag, ['hole_' pName]);
+        local_cases(k).angle_tag          = angTag;
+        local_cases(k).lamellar_angle_deg = ang;
+        local_cases(k).defect_type        = 'hole';
+        local_cases(k).position_name      = pName;
+        local_cases(k).position_xy        = pXY;
+        local_cases(k).severity           = holeSev;
+        local_cases(k).local_defects      = ds;
+    end
+end
+
 cfg = struct();
 cfg.root            = scriptDir;
 cfg.resultsRoot     = resultsRoot;
@@ -62,5 +162,6 @@ cfg.stagingRoot     = fullfile(resultsRoot, '.staging');
 cfg.defectFractions = defectFractions;
 cfg.lamellarAngles  = lamellarAngles;
 cfg.cases           = cases;
+cfg.local_cases     = local_cases;
 cfg.baseParams      = baseParams;
 end

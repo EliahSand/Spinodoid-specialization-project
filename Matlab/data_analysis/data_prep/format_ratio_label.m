@@ -6,6 +6,10 @@ arguments
     tag (1, :) char
 end
 
+if isempty(tag)
+    label = '';
+    return;
+end
 digits = regexp(tag, '\d+', 'match', 'once');
 if isempty(digits)
     label = tag;
