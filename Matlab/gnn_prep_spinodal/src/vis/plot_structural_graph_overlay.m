@@ -64,6 +64,7 @@ function ax = plot_structural_graph_overlay(fullGraph, skeletonGraph, structGrap
     legendLabels{end + 1} = 'Structural nodes'; %#ok<AGROW>
 
     axis(ax, 'equal');
+    axis(ax, 'tight');
     box(ax, 'on');
     grid(ax, 'on');
     if strlength(string(opts.Title)) > 0

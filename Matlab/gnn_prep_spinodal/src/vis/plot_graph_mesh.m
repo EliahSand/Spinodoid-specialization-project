@@ -123,6 +123,7 @@ function h = plot_graph_mesh(graphData, varargin)
     end
 
     axis(ax, 'equal');
+    axis(ax, 'tight');
     if strlength(string(opts.XLabel)) > 0
         xlabel(ax, char(string(opts.XLabel)));
     end

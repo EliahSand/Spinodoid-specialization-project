@@ -118,10 +118,10 @@ function outputs = main_spinodal_gnn_prep_from_inp(inpPath, varargin)
             'YLabel', yLabelText);
 
         if logical(opts.SavePlots)
-            plotPaths.full_png = fullfile(dirs.full_plots, 'full_graph.png');
-            plotPaths.structural_overlay_png = fullfile(dirs.struct_plots, 'structural_graph_overlay.png');
-            saveas(figFull, plotPaths.full_png);
-            saveas(figStruct, plotPaths.structural_overlay_png);
+            plotPaths.full_fig = fullfile(dirs.full_plots, 'full_graph.fig');
+            plotPaths.structural_overlay_fig = fullfile(dirs.struct_plots, 'structural_graph_overlay.fig');
+            savefig(figFull, plotPaths.full_fig);
+            savefig(figStruct, plotPaths.structural_overlay_fig);
         end
     end
 

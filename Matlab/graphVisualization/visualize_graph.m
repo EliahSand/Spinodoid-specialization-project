@@ -85,6 +85,13 @@ if opts.ShowFullGraph
         'YLabel', 'y');
 end
 
+sampleFigDir = fullfile(samplesDir, sample_id);
+if isfolder(sampleFigDir)
+    figPath = fullfile(sampleFigDir, sprintf('%s_graph_views.fig', sample_id));
+    savefig(figModel, figPath);
+    fprintf('Saved figure to %s\n', figPath);
+end
+
 fprintf('Sample: %s\n', sample_id);
 fprintf('GNN input: %d nodes, %d edges, features [%s]\n', ...
     size(X, 2), size(EI, 2), feature_name_text(featureNames));
