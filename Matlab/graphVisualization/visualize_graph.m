@@ -35,14 +35,12 @@ if isfolder(gnnGraphDir)
 end
 
 gnnPrepRoot = fullfile(repoRoot, 'Matlab', 'gnn_prep_spinodal');
-if opts.ShowFullGraph && ~isfolder(gnnPrepRoot)
+if ~isfolder(gnnPrepRoot)
     error('visualize_graph:MissingGnnPrep', ...
         'Could not find gnn_prep_spinodal at: %s', gnnPrepRoot);
 end
-if opts.ShowFullGraph
-    addpath(gnnPrepRoot);
-    addpath(genpath(fullfile(gnnPrepRoot, 'src')));
-end
+addpath(gnnPrepRoot);
+addpath(genpath(fullfile(gnnPrepRoot, 'src')));
 
 [X, EI, featureNames, sampleData] = load_model_input_graph(sample_id, samplesDir);
 
@@ -248,39 +246,6 @@ xlabel(ax, 'x');
 ylabel(ax, 'y');
 set(ax, 'FontSize', 14, 'LineWidth', 1.0);
 hold(ax, 'off');
-end
-
-function draw_radius_disks(ax, x, y, r, faceColor, faceAlpha)
-if isempty(x)
-    return;
-end
-if nargin < 5 || isempty(faceColor)
-    faceColor = [0.20, 0.42, 0.85];
-end
-if nargin < 6 || isempty(faceAlpha)
-    faceAlpha = 0.92;
-end
-
-nNodes = numel(x);
-nSeg = 40;
-theta = linspace(0, 2 * pi, nSeg + 1);
-theta(end) = [];
-
-vertices = zeros(nNodes * nSeg, 2);
-faces = reshape(1:(nNodes * nSeg), nSeg, nNodes).';
-
-for i = 1:nNodes
-    rows = (i - 1) * nSeg + (1:nSeg);
-    vertices(rows, 1) = x(i) + r(i) * cos(theta(:));
-    vertices(rows, 2) = y(i) + r(i) * sin(theta(:));
-end
-
-patch(ax, ...
-    'Faces', faces, ...
-    'Vertices', vertices, ...
-    'FaceColor', faceColor, ...
-    'EdgeColor', 'none', ...
-    'FaceAlpha', faceAlpha);
 end
 
 function draw_edges(ax, x, y, EI, color, lineWidth)

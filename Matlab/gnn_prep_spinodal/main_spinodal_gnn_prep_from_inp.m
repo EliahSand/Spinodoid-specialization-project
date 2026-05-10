@@ -24,6 +24,7 @@ function outputs = main_spinodal_gnn_prep_from_inp(inpPath, varargin)
     p.addParameter('RunName', '', @(x) ischar(x) || isstring(x));
     p.addParameter('MakePlots', false, @(x) islogical(x) || isnumeric(x));
     p.addParameter('SavePlots', false, @(x) islogical(x) || isnumeric(x));
+    p.addParameter('MakeRadiusPlot', false, @(x) islogical(x) || isnumeric(x));
     p.addParameter('PlotUnitsScale', 1000, @(x) isnumeric(x) && isscalar(x) && isfinite(x) && x > 0);
     p.addParameter('PlotXLabel', '', @(x) ischar(x) || isstring(x));
     p.addParameter('PlotYLabel', '', @(x) ischar(x) || isstring(x));
@@ -117,11 +118,27 @@ function outputs = main_spinodal_gnn_prep_from_inp(inpPath, varargin)
             'XLabel', xLabelText, ...
             'YLabel', yLabelText);
 
+        figRadius = [];
+        if logical(opts.MakeRadiusPlot)
+            figRadius = figure('Name', 'Structural Node Radii');
+            axRadius = axes('Parent', figRadius);
+            plot_structural_node_radii(fullGraph, structuralGraph, ...
+                'AxesHandle', axRadius, ...
+                'Title', sprintf('Structural Node Radii (detail=%.2f)', opts.StructuralDetailLevel), ...
+                'UnitsScale', opts.PlotUnitsScale, ...
+                'XLabel', xLabelText, ...
+                'YLabel', yLabelText);
+        end
+
         if logical(opts.SavePlots)
             plotPaths.full_fig = fullfile(dirs.full_plots, 'full_graph.fig');
             plotPaths.structural_overlay_fig = fullfile(dirs.struct_plots, 'structural_graph_overlay.fig');
             savefig(figFull, plotPaths.full_fig);
             savefig(figStruct, plotPaths.structural_overlay_fig);
+            if ~isempty(figRadius)
+                plotPaths.structural_radius_fig = fullfile(dirs.struct_plots, 'structural_node_radii.fig');
+                savefig(figRadius, plotPaths.structural_radius_fig);
+            end
         end
     end
 
