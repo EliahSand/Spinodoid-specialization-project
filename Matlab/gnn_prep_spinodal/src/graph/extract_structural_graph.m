@@ -48,25 +48,14 @@ function [structGraph, skeletonGraph, debugData, annotatedFullGraph] = extract_s
         end
     end
     occMask = nodeAt > 0;
-    componentAt = zeros(nRows, nCols);
-    if isfield(fullGraph, 'graph')
-        fullCompId = conncomp(fullGraph.graph);
-    else
-        fullCompId = transpose(1:nFull);
-    end
-    for i = 1:nFull
-        componentAt(yBin(i), xBin(i)) = fullCompId(i);
-    end
+    closedMask = imclose(occMask, strel('square', 3));
+    componentAt = periodic_components(closedMask);
 
-    boundaryMask = false(nRows, nCols);
-    fullBoundary = logical(fullGraph.boundary_mask(:));
-    if numel(fullBoundary) ~= nFull
-        error('extract_structural_graph:BadBoundaryMask', ...
-            'boundary_mask length does not match node count.');
-    end
-    for i = find(fullBoundary(:)).'
-        boundaryMask(yBin(i), xBin(i)) = true;
-    end
+    % Periodic boundary mask: occupied pixel is boundary iff any 4-connected
+    % periodic neighbour is void. circshift wraps at domain edges without tiling.
+    boundaryMask = occMask & ~( ...
+        circshift(occMask,  1, 1) & circshift(occMask, -1, 1) & ...
+        circshift(occMask,  1, 2) & circshift(occMask, -1, 2));
     if ~any(boundaryMask(:))
         boundaryMask = find_perimeter_pixels(occMask);
     end
@@ -75,14 +64,18 @@ function [structGraph, skeletonGraph, debugData, annotatedFullGraph] = extract_s
     [radiusMap, thicknessMap, spacingInfo] = compute_physical_radius_map(occMask, boundaryMask, xVals, yVals);
     annotatedFullGraph = attach_full_graph_thickness(fullGraph, xBin, yBin, radiusMap, thicknessMap);
 
+    % Skeletonize on closedMask so skeleton extends through 1-pixel gaps,
+    % then restrict to occMask so nodes only land on real FE positions.
+    fullSkel = skeletonize_component(closedMask) & occMask;
+
     skelMask = false(size(occMask));
     for compId = 1:max(componentAt(:))
         compMask = componentAt == compId;
-        if ~any(compMask(:))
+        if ~any(compMask(:)) || nnz(compMask) < opts.MinIslandNodes
             continue;
         end
-        compSkel = zhang_suen_thinning(compMask);
-        compSkel = enforce_component_representatives(compSkel, compMask, boundaryStepDistance, opts.MinIslandNodes);
+        compSkel = fullSkel & compMask;
+        compSkel = enforce_component_representatives(compSkel, compMask, boundaryStepDistance, 1);
         skelMask = skelMask | compSkel;
     end
 
@@ -95,7 +88,7 @@ function [structGraph, skeletonGraph, debugData, annotatedFullGraph] = extract_s
 
     [skeletonGraph, skelDebug] = build_skeleton_graph_from_mask( ...
         skelMask, componentAt, nodeAt, xy, annotatedFullGraph.node_labels(:), fullNodeData, boundaryStepDistance, parentKind, ...
-        annotatedFullGraph.node_radius(:), annotatedFullGraph.node_thickness(:));
+        annotatedFullGraph.node_radius(:), annotatedFullGraph.node_thickness(:), closedMask);
 
     structGraph = compress_skeleton_graph(skeletonGraph, opts.DetailLevel);
     structGraphBeforeCleanup = structGraph;
@@ -214,9 +207,10 @@ function distMap = multi_source_grid_distance(mask, seedMask)
     end
 end
 
-function [radiusMap, thicknessMap, spacingInfo] = compute_physical_radius_map(mask, boundaryMask, xVals, yVals)
-    radiusMap = inf(size(mask));
-    thicknessMap = inf(size(mask));
+function [radiusMap, thicknessMap, spacingInfo] = compute_physical_radius_map(mask, ~, xVals, yVals)
+    [nRows, nCols] = size(mask);
+    radiusMap    = zeros(nRows, nCols);
+    thicknessMap = zeros(nRows, nCols);
 
     dx = diff(sort(xVals(:)));
     dy = diff(sort(yVals(:)));
@@ -227,13 +221,18 @@ function [radiusMap, thicknessMap, spacingInfo] = compute_physical_radius_map(ma
     spacingInfo.dy = median_or_nan(dy);
     spacingInfo.h = median_or_nan([dx(:); dy(:)]);
 
-    if isempty(find(mask & boundaryMask, 1))
+    if ~any(mask(:)) || ~isfinite(spacingInfo.h) || spacingInfo.h <= 0
         return;
     end
 
-    % Grid is always uniform: BFS hop-count × h gives exact physical radius.
-    hopDist = multi_source_grid_distance(mask, boundaryMask);
-    radiusMap(mask) = hopDist(mask) * spacingInfo.h;
+    % Tile 3x3 so bwdist sees periodic continuation of the material.
+    % Prevents domain edges from acting as material boundary for periodic
+    % spinodoid geometries. Extract the centre tile after the transform.
+    tiled = repmat(logical(mask), 3, 3);
+    distTiled = bwdist(~tiled, 'euclidean');
+    distPix = distTiled((nRows + 1):(2 * nRows), (nCols + 1):(2 * nCols));
+
+    radiusMap(mask)    = double(distPix(mask)) * spacingInfo.h;
     thicknessMap(mask) = 2 * radiusMap(mask);
 end
 
@@ -266,71 +265,18 @@ function graphOut = attach_full_graph_thickness(graphIn, xBin, yBin, radiusMap, 
     graphOut.node_data_table = upsert_table_column(graphOut.node_data_table, 'Thickness', thickness(:));
 end
 
-function skel = zhang_suen_thinning(mask)
-    work = false(size(mask) + 2);
-    work(2:(end - 1), 2:(end - 1)) = logical(mask);
-    changed = true;
-    while changed
-        changed = false;
-
-        toDelete = thinning_iteration(work, 1);
-        if any(toDelete(:))
-            work(toDelete) = false;
-            changed = true;
-        end
-
-        toDelete = thinning_iteration(work, 2);
-        if any(toDelete(:))
-            work(toDelete) = false;
-            changed = true;
-        end
+function skel = skeletonize_component(mask)
+    mask = logical(mask);
+    if ~any(mask(:))
+        skel = false(size(mask));
+        return;
     end
-    skel = work(2:(end - 1), 2:(end - 1));
-end
-
-function toDelete = thinning_iteration(skel, iterId)
-    [nRows, nCols] = size(skel);
-    toDelete = false(nRows, nCols);
-
-    for r = 2:(nRows - 1)
-        for c = 2:(nCols - 1)
-            if ~skel(r, c)
-                continue;
-            end
-
-            p2 = skel(r - 1, c);
-            p3 = skel(r - 1, c + 1);
-            p4 = skel(r, c + 1);
-            p5 = skel(r + 1, c + 1);
-            p6 = skel(r + 1, c);
-            p7 = skel(r + 1, c - 1);
-            p8 = skel(r, c - 1);
-            p9 = skel(r - 1, c - 1);
-            neigh = [p2 p3 p4 p5 p6 p7 p8 p9];
-
-            n = sum(neigh);
-            if n < 2 || n > 6
-                continue;
-            end
-
-            transitions = sum(~neigh & [neigh(2:end), neigh(1)]);
-            if transitions ~= 1
-                continue;
-            end
-
-            if iterId == 1
-                condA = ~(p2 && p4 && p6);
-                condB = ~(p4 && p6 && p8);
-            else
-                condA = ~(p2 && p4 && p8);
-                condB = ~(p2 && p6 && p8);
-            end
-
-            if condA && condB
-                toDelete(r, c) = true;
-            end
-        end
+    try
+        skel = bwskel(mask);
+    catch
+        skel = bwmorph(mask, 'skel', Inf);
     end
+    skel = logical(skel);
 end
 
 function skelOut = enforce_component_representatives(skelMask, occMask, distMap, minIslandNodes)
@@ -357,6 +303,23 @@ function skelOut = enforce_component_representatives(skelMask, occMask, distMap,
         end
         skelOut(compIdx(pickRel)) = true;
     end
+end
+
+function labels = periodic_components(mask)
+    [nRows, nCols] = size(mask);
+    labels = zeros(nRows, nCols);
+    if ~any(mask(:))
+        return;
+    end
+    tiled = repmat(logical(mask), 3, 3);
+    tiledLbl = bwlabel(tiled, 8);
+    centre = tiledLbl((nRows + 1):(2 * nRows), (nCols + 1):(2 * nCols));
+    centre(~mask) = 0;
+    [u, ~, ic] = unique(centre(:));
+    remap = zeros(numel(u), 1);
+    keep = u > 0;
+    remap(keep) = 1:nnz(keep);
+    labels = reshape(remap(ic), nRows, nCols);
 end
 
 function labels = connected_components_binary(mask, conn)
@@ -409,7 +372,10 @@ function labels = connected_components_binary(mask, conn)
     end
 end
 
-function [skelGraph, debugData] = build_skeleton_graph_from_mask(skelMask, componentAt, nodeAt, xyFull, fullLabels, fullNodeData, distMap, parentKind, fullRadius, fullThickness)
+function [skelGraph, debugData] = build_skeleton_graph_from_mask(skelMask, componentAt, nodeAt, xyFull, fullLabels, fullNodeData, distMap, parentKind, fullRadius, fullThickness, closedMask)
+    if nargin < 11 || isempty(closedMask)
+        closedMask = skelMask | false(size(skelMask));
+    end
     skelLinear = find(skelMask);
     nSkel = numel(skelLinear);
     if nSkel == 0
@@ -424,18 +390,26 @@ function [skelGraph, debugData] = build_skeleton_graph_from_mask(skelMask, compo
     skelLocalAt(skelLinear) = 1:nSkel;
 
     dirs = [0 1; 1 -1; 1 0; 1 1];
+    % 2-step bridge directions (same 4 axes at stride 2) — used to bridge
+    % 1-pixel closed-only cells where the skeleton was restricted to occMask.
+    bridgeDirs = [0 2; 2 -2; 2 0; 2 2];
     edges = zeros(0, 2);
     lengths = zeros(0, 1);
     for i = 1:nSkel
         [r, c] = ind2sub(size(skelMask), skelLinear(i));
+        thisComp = componentAt(r, c);
+        if thisComp == 0
+            continue;
+        end
+
+        % --- immediate 8-conn neighbours ---
         for d = 1:size(dirs, 1)
             rr = r + dirs(d, 1);
             cc = c + dirs(d, 2);
             if rr < 1 || rr > size(skelMask, 1) || cc < 1 || cc > size(skelMask, 2)
                 continue;
             end
-            thisComp = componentAt(r, c);
-            if thisComp == 0 || componentAt(rr, cc) ~= thisComp
+            if componentAt(rr, cc) ~= thisComp
                 continue;
             end
             if abs(dirs(d, 1)) == 1 && abs(dirs(d, 2)) == 1
@@ -446,6 +420,33 @@ function [skelGraph, debugData] = build_skeleton_graph_from_mask(skelMask, compo
             end
             j = skelLocalAt(rr, cc);
             if j == 0
+                continue;
+            end
+            edges(end + 1, :) = [i, j]; %#ok<AGROW>
+            lengths(end + 1, 1) = norm(coords(i, :) - coords(j, :)); %#ok<AGROW>
+        end
+
+        % --- 2-step bridges across closed-only gap cells ---
+        for d = 1:size(bridgeDirs, 1)
+            dr = bridgeDirs(d, 1);
+            dc = bridgeDirs(d, 2);
+            rr = r + dr;
+            cc = c + dc;
+            if rr < 1 || rr > size(skelMask, 1) || cc < 1 || cc > size(skelMask, 2)
+                continue;
+            end
+            j = skelLocalAt(rr, cc);
+            if j == 0
+                continue;
+            end
+            if componentAt(rr, cc) ~= thisComp
+                continue;
+            end
+            % Mid-cell must be a closed-only bridge pixel (in closedMask but
+            % not a skeleton pixel itself).
+            rm = r + dr / 2;
+            cm = c + dc / 2;
+            if ~closedMask(rm, cm) || skelLocalAt(rm, cm) ~= 0
                 continue;
             end
             edges(end + 1, :) = [i, j]; %#ok<AGROW>

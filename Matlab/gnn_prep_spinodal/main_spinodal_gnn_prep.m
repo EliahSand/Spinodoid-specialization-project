@@ -120,10 +120,6 @@ function outputs = main_spinodal_gnn_prep(inpPath, csvPath, varargin)
         'MinIslandNodes', opts.StructuralMinIslandNodes);
     fullGraph = fullGraphAnnotated;
 
-    fullPaths = export_graph_csv(fullGraph, dirs.full_data, 'full_graph');
-    structuralPaths = struct();
-    structuralPaths.skeleton = export_graph_csv(skeletonGraph, dirs.struct_data, 'skeleton_graph');
-    structuralPaths.structural = export_graph_csv(structuralGraph, dirs.struct_data, 'structural_graph');
 
     xLabelText = char(string(opts.PlotXLabel));
     yLabelText = char(string(opts.PlotYLabel));
@@ -217,10 +213,7 @@ function outputs = main_spinodal_gnn_prep(inpPath, csvPath, varargin)
     outputs.skeleton_graph = skeletonGraph;
     outputs.structural_graph = structuralGraph;
     outputs.structural_debug = structuralDebug;
-    outputs.exports = struct( ...
-        'full', fullPaths, ...
-        'structural', structuralPaths, ...
-        'plots', plotPaths);
+    outputs.exports = struct('plots', plotPaths);
 end
 
 function ensure_dir(pathStr)
