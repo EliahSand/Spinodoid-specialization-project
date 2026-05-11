@@ -1,21 +1,17 @@
-function draw_radius_disks(ax, x, y, r, faceColor, faceAlpha)
+function draw_radius_disks(ax, x, y, r)
 %DRAW_RADIUS_DISKS Draw circle outlines at (x,y) with given radii.
 %
-%   draw_radius_disks(ax, x, y, r, faceColor, faceAlpha)
+%   draw_radius_disks(ax, x, y, r)
 %
 %   Uses a single vectorised patch call — no per-node loop overhead.
-%   faceColor  : 1x3 RGB (default [0.20 0.42 0.85])
-%   faceAlpha  : edge alpha scalar in [0,1] (default 0.92)
 
 if isempty(x)
     return;
 end
-if nargin < 5 || isempty(faceColor)
-    faceColor = [0.20, 0.42, 0.85];
-end
-if nargin < 6 || isempty(faceAlpha)
-    faceAlpha = 0.92;
-end
+
+faceColor = [0.20, 0.42, 0.85];
+faceAlpha = 0.34;
+lineWidth = 0.45;
 
 nNodes = numel(x);
 nSeg = 40;
@@ -37,5 +33,5 @@ patch(ax, ...
     'FaceColor', 'none', ...
     'EdgeColor', faceColor, ...
     'EdgeAlpha', faceAlpha, ...
-    'LineWidth', 0.8);
+    'LineWidth', lineWidth);
 end

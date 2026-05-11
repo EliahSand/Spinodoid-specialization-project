@@ -3,8 +3,8 @@ function ax = plot_structural_node_radii(fullGraph, structGraph, varargin)
 %
 % ax = PLOT_STRUCTURAL_NODE_RADII(fullGraph, structGraph, ...)
 %
-% The dense reference graph is drawn as a faint gray background. Each
-% structural node is drawn as a filled disk whose radius equals node_radius.
+% The dense reference graph is drawn as a readable gray spinodoid
+% background. Each structural node radius is drawn as a faint blue outline.
 %
 % Name-Value options:
 %   'AxesHandle'  : target axes (default create new figure/axes)
@@ -12,10 +12,8 @@ function ax = plot_structural_node_radii(fullGraph, structGraph, varargin)
 %   'UnitsScale'  : coordinate / radius scale factor (default 1)
 %   'XLabel'      : x-axis label
 %   'YLabel'      : y-axis label
-%   'ShowDense'   : draw faint dense reference edges (default true)
+%   'ShowDense'   : draw dense reference edges (default true)
 %   'ShowEdges'   : draw structural graph edges (default true)
-%   'DiskColor'   : 1x3 RGB for disk fill (default [0.20 0.42 0.85])
-%   'DiskAlpha'   : disk face alpha (default 0.85)
 
     p = inputParser;
     p.addParameter('AxesHandle', [], @(x) isempty(x) || isa(x, 'matlab.graphics.axis.Axes'));
@@ -25,10 +23,13 @@ function ax = plot_structural_node_radii(fullGraph, structGraph, varargin)
     p.addParameter('YLabel', '', @(x) ischar(x) || isstring(x));
     p.addParameter('ShowDense', true, @(x) islogical(x) || isnumeric(x));
     p.addParameter('ShowEdges', true, @(x) islogical(x) || isnumeric(x));
-    p.addParameter('DiskColor', [0.20, 0.42, 0.85], @(x) isnumeric(x) && numel(x) == 3);
-    p.addParameter('DiskAlpha', 0.85, @(x) isnumeric(x) && isscalar(x));
     p.parse(varargin{:});
     opts = p.Results;
+
+    denseEdgeColor = [0.52, 0.52, 0.52];
+    denseEdgeWidth = 0.45;
+    structuralEdgeColor = [0.45, 0.45, 0.45];
+    structuralEdgeWidth = 0.45;
 
     if isempty(opts.AxesHandle)
         figure('Name', 'Structural Node Radii');
@@ -40,11 +41,13 @@ function ax = plot_structural_node_radii(fullGraph, structGraph, varargin)
     hold(ax, 'on');
 
     if logical(opts.ShowDense) && isfield(fullGraph, 'edges_local') && ~isempty(fullGraph.edges_local)
-        draw_edges_local(ax, fullGraph.node_coords, fullGraph.edges_local, opts.UnitsScale, [0.80 0.80 0.80], 0.30);
+        draw_edges_local(ax, fullGraph.node_coords, fullGraph.edges_local, ...
+            opts.UnitsScale, denseEdgeColor, denseEdgeWidth);
     end
 
     if logical(opts.ShowEdges) && isfield(structGraph, 'edges_local') && ~isempty(structGraph.edges_local)
-        draw_edges_local(ax, structGraph.node_coords, structGraph.edges_local, opts.UnitsScale, [0.25 0.25 0.25], 1.2);
+        draw_edges_local(ax, structGraph.node_coords, structGraph.edges_local, ...
+            opts.UnitsScale, structuralEdgeColor, structuralEdgeWidth);
     end
 
     xy = structGraph.node_coords(:, 1:2) * opts.UnitsScale;
@@ -54,9 +57,9 @@ function ax = plot_structural_node_radii(fullGraph, structGraph, varargin)
         r = r * opts.UnitsScale;
         valid = isfinite(r) & r > 0;
         if any(valid)
-            draw_radius_disks(ax, xy(valid, 1), xy(valid, 2), r(valid), opts.DiskColor, opts.DiskAlpha);
+            draw_radius_disks(ax, xy(valid, 1), xy(valid, 2), r(valid));
         end
-        scatter(ax, xy(:, 1), xy(:, 2), 20, [0.10, 0.10, 0.10], 'filled', 'MarkerEdgeColor', 'none');
+        scatter(ax, xy(:, 1), xy(:, 2), 10, [0.18, 0.18, 0.18], 'filled', 'MarkerEdgeColor', 'none');
     else
         scatter(ax, xy(:, 1), xy(:, 2), 20, [0.85, 0.20, 0.10], 'filled', 'MarkerEdgeColor', 'none');
     end
