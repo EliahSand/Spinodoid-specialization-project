@@ -239,10 +239,10 @@ function [radiusMap, thicknessMap] = compute_physical_radius_map(mask, xVals, yV
         return;
     end
 
-    % Tile 3x3 so bwdist sees periodic continuation of the material.
-    tiled = repmat(logical(mask), 3, 3);
-    distTiled = bwdist(~tiled, 'euclidean');
-    distPix = distTiled((nRows + 1):(2 * nRows), (nCols + 1):(2 * nCols));
+    % Non-periodic Euclidean distance: material genuinely terminates at the
+    % domain edges (clamped/loaded/free in the FEA), so radii must reflect
+    % that. Tiling would falsely inflate edge-node radii.
+    distPix = bwdist(~mask, 'euclidean');
 
     radiusMap(mask)    = double(distPix(mask)) * h;
     thicknessMap(mask) = 2 * radiusMap(mask);
