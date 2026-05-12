@@ -1,0 +1,3 @@
+Step 1 complete: generated=6000 failed=0 in 77.42 min.
+
+step 2 : 2 min 52 sek
