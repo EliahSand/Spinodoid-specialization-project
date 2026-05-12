@@ -466,6 +466,11 @@ function [skelGraph, debugData] = build_skeleton_graph_from_mask(skelMask, compo
                 continue;
             end
             if abs(dirs(d, 1)) == 1 && abs(dirs(d, 2)) == 1
+                % If an orthogonal skeleton pixel already connects this corner,
+                % the diagonal edge creates a tiny artificial triangle.
+                if has_orthogonal_skeleton_corner_path(skelLocalAt, componentAt, r, c, rr, cc, thisComp)
+                    continue;
+                end
                 % Prevent corner-touch shortcuts across distinct spinodal regions.
                 if ~supports_diagonal_link(componentAt, r, c, rr, cc, thisComp)
                     continue;
@@ -552,7 +557,10 @@ function [graphOut, pruneDebug] = prune_radius_covered_skeleton_spurs(graphIn, r
         return;
     end
 
-    maxIterations = max(1, graphIn.num_nodes);
+    % Only prune branches that are terminal in the original skeleton. Repeating
+    % this pass can walk back into real local bulge branches after a tiny stub
+    % has been removed.
+    maxIterations = 1;
     for iter = 1:maxIterations
         G = graphOut.graph;
         deg = degree(G);
@@ -716,6 +724,15 @@ function tf = supports_diagonal_link(componentAt, r0, c0, r1, c1, compId)
         return;
     end
     tf = componentAt(r0, c1) == compId || componentAt(r1, c0) == compId;
+end
+
+function tf = has_orthogonal_skeleton_corner_path(skelLocalAt, componentAt, r0, c0, r1, c1, compId)
+    tf = false;
+    if abs(r1 - r0) ~= 1 || abs(c1 - c0) ~= 1
+        return;
+    end
+    tf = (componentAt(r0, c1) == compId && skelLocalAt(r0, c1) > 0) || ...
+         (componentAt(r1, c0) == compId && skelLocalAt(r1, c0) > 0);
 end
 
 function structGraph = compress_skeleton_graph(skelGraph, detailLevel)
