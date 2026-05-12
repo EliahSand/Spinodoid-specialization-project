@@ -4,15 +4,9 @@ function [structGraph, skeletonGraph, debugData, annotatedFullGraph] = extract_s
 % [structGraph, skeletonGraph, debugData, annotatedFullGraph] = EXTRACT_STRUCTURAL_GRAPH(fullGraph, ...)
 %
 % Name-Value options:
-%   'DetailLevel'       : [0,1], 0 = coarsest, 1 = keep full skeleton chains
-%   'MinIslandNodes'    : minimum skeleton-node count kept for an isolated component
-%   'SpurPruneRadiusFactor' : prune terminal branches shorter than this
-%                             multiple of junction radius (default 1.5)
-%
-% The dense graph is first rasterized onto its native XY node grid, reduced to a
-% one-node-thick medial skeleton, and then compressed by collapsing degree-2
-% chains. Reduced edges keep the full skeleton polyline and the originating
-% dense-graph node ids.
+%   'DetailLevel'           : [0,1], 0 = coarsest, 1 = keep full skeleton chains
+%   'MinIslandNodes'        : minimum skeleton-node count kept for an isolated component
+%   'SpurPruneRadiusFactor' : prune terminal branches shorter than this multiple of junction radius
 
     p = inputParser;
     p.addParameter('DetailLevel', 0.20, @(x) isnumeric(x) && isscalar(x) && x >= 0 && x <= 1);
@@ -21,111 +15,92 @@ function [structGraph, skeletonGraph, debugData, annotatedFullGraph] = extract_s
     p.parse(varargin{:});
     opts = p.Results;
 
-    required = {'node_coords', 'node_labels', 'edges_local', 'boundary_mask'};
-    for i = 1:numel(required)
-        if ~isfield(fullGraph, required{i})
+    for f = {'node_coords', 'node_labels', 'edges_local', 'boundary_mask'}
+        if ~isfield(fullGraph, f{1})
             error('extract_structural_graph:MissingField', ...
-                'fullGraph is missing required field "%s".', required{i});
+                'fullGraph is missing required field "%s".', f{1});
         end
     end
 
-    coords = fullGraph.node_coords;
-    if size(coords, 2) < 2
-        error('extract_structural_graph:BadCoords', ...
-            'fullGraph.node_coords must have at least two columns [X,Y].');
-    end
-    xy = coords(:, 1:2);
+    xy = fullGraph.node_coords(:, 1:2);
     nFull = size(xy, 1);
 
     [xVals, xBin] = cluster_axis_values(xy(:, 1));
     [yVals, yBin] = cluster_axis_values(xy(:, 2));
-    nCols = numel(xVals);
     nRows = numel(yVals);
+    nCols = numel(xVals);
 
     nodeAt = zeros(nRows, nCols);
     for i = 1:nFull
-        r = yBin(i);
-        c = xBin(i);
-        if nodeAt(r, c) == 0
-            nodeAt(r, c) = i;
+        if nodeAt(yBin(i), xBin(i)) == 0
+            nodeAt(yBin(i), xBin(i)) = i;
         end
     end
     occMask = nodeAt > 0;
     componentAt = periodic_components(occMask);
 
-    % Periodic boundary mask: occupied pixel is boundary iff any 4-connected
-    % periodic neighbour is void. circshift wraps at domain edges without tiling.
+    % Periodic boundary: occupied iff some 4-neighbour (with wrap) is void.
     boundaryMask = occMask & ~( ...
         circshift(occMask,  1, 1) & circshift(occMask, -1, 1) & ...
         circshift(occMask,  1, 2) & circshift(occMask, -1, 2));
-    if ~any(boundaryMask(:))
-        boundaryMask = find_perimeter_pixels(occMask);
-    end
 
     boundaryStepDistance = multi_source_grid_distance(occMask, boundaryMask);
-    [radiusMap, thicknessMap, spacingInfo] = compute_physical_radius_map(occMask, boundaryMask, xVals, yVals);
+    [radiusMap, thicknessMap] = compute_physical_radius_map(occMask, xVals, yVals);
     annotatedFullGraph = attach_full_graph_thickness(fullGraph, xBin, yBin, radiusMap, thicknessMap);
 
     % Skeletonize the real occupied material only. Closing the mask before
-    % skeletonization can erase local medial branches and can create false
+    % skeletonization can erase local medial branches and create false
     % topological bridges through one-cell void gaps.
-    fullSkel = skeletonize_component(occMask);
+    fullSkel = skeletonize(occMask);
 
     skelMask = false(size(occMask));
-    for compId = 1:max(componentAt(:))
+    nComp = max(componentAt(:));
+    for compId = 1:nComp
         compMask = componentAt == compId;
-        if ~any(compMask(:)) || nnz(compMask) < opts.MinIslandNodes
+        if nnz(compMask) < opts.MinIslandNodes
             continue;
         end
         compSkel = fullSkel & compMask;
-        compSkel = enforce_component_representatives(compSkel, compMask, boundaryStepDistance, 1);
+        % Ensure every 8-connected sub-piece of this periodic component (a
+        % single periodic component can split into several pieces when
+        % unwrapped) has at least one skeleton representative.
+        sub = bwlabel(compMask, 8);
+        for subId = 1:max(sub(:))
+            pieceMask = sub == subId;
+            if nnz(compSkel & pieceMask) >= opts.MinIslandNodes
+                continue;
+            end
+            pieceIdx = find(pieceMask);
+            [~, pickRel] = max(boundaryStepDistance(pieceIdx));
+            compSkel(pieceIdx(pickRel)) = true;
+        end
         skelMask = skelMask | compSkel;
     end
 
-    parentKind = get_default(annotatedFullGraph, 'kind', 'full_reference_graph');
-    fullNodeData = table();
-    if isfield(annotatedFullGraph, 'node_data_table') && istable(annotatedFullGraph.node_data_table) ...
-            && height(annotatedFullGraph.node_data_table) == nFull
-        fullNodeData = annotatedFullGraph.node_data_table;
-    end
+    skeletonGraph = build_skeleton_graph(skelMask, componentAt, nodeAt, xy, ...
+        annotatedFullGraph.node_labels(:), annotatedFullGraph.node_radius(:), annotatedFullGraph.node_thickness(:));
+    skeletonGraph = prune_radius_covered_spurs(skeletonGraph, opts.SpurPruneRadiusFactor);
 
-    [skeletonGraph, skelDebug] = build_skeleton_graph_from_mask( ...
-        skelMask, componentAt, nodeAt, xy, annotatedFullGraph.node_labels(:), fullNodeData, boundaryStepDistance, parentKind, ...
-        annotatedFullGraph.node_radius(:), annotatedFullGraph.node_thickness(:));
-    skeletonGraphBeforePrune = skeletonGraph;
-    [skeletonGraph, spurPruneDebug] = prune_radius_covered_skeleton_spurs(skeletonGraph, opts.SpurPruneRadiusFactor);
-    [skelMask, skelDebug.skelLocalAtGrid] = skeleton_mask_from_graph(skeletonGraph, size(occMask));
-
-    structGraph = compress_skeleton_graph(skeletonGraph, opts.DetailLevel);
+    structGraph = compress_skeleton(skeletonGraph, opts.DetailLevel);
     structGraphBeforeCleanup = structGraph;
-    [structGraph, cleanupDebug] = cleanup_structural_graph(structGraph, skeletonGraph);
-    structGraph = attach_structural_edge_thickness(structGraph, annotatedFullGraph);
+    [structGraph, cleanupInfo] = cleanup_structural(structGraph);
+    structGraph.cleanup_info = cleanupInfo;
+    structGraph = attach_edge_thickness_min(structGraph, annotatedFullGraph.node_thickness(:));
 
     debugData = struct();
-    debugData.x_grid = xVals;
-    debugData.y_grid = yVals;
-    debugData.node_at_grid = nodeAt;
-    debugData.occupancy_mask = occMask;
-    debugData.boundary_mask = boundaryMask;
-    debugData.boundary_step_distance = boundaryStepDistance;
-    debugData.component_at_grid = componentAt;
-    debugData.radius_map = radiusMap;
-    debugData.thickness_map = thicknessMap;
-    debugData.spacing_info = spacingInfo;
-    debugData.skeleton_mask = skelMask;
-    debugData.skeleton_local_at_grid = skelDebug.skelLocalAtGrid;
-    debugData.skeleton_before_spur_prune = skeletonGraphBeforePrune;
-    debugData.skeleton_spur_prune = spurPruneDebug;
     debugData.structural_before_cleanup = structGraphBeforeCleanup;
-    debugData.structural_cleanup = cleanupDebug;
 end
+
+% =========================================================================
+% Grid / mask helpers
+% =========================================================================
 
 function [valsOut, binIdx] = cluster_axis_values(vals)
     vals = double(vals(:));
     n = numel(vals);
     if n == 0
         valsOut = zeros(0, 1);
-        binIdx = zeros(0, 1);
+        binIdx  = zeros(0, 1);
         return;
     end
 
@@ -147,8 +122,8 @@ function [valsOut, binIdx] = cluster_axis_values(vals)
         groupSorted(i) = g;
     end
 
-    occupiedVals = accumarray(groupSorted, sortedVals, [], @mean);
-    occupiedBinIdx = zeros(n, 1);
+    occupiedVals    = accumarray(groupSorted, sortedVals, [], @mean);
+    occupiedBinIdx  = zeros(n, 1);
     occupiedBinIdx(order) = groupSorted;
 
     [valsOut, occupiedToFull] = expand_regular_axis_values(occupiedVals, tol);
@@ -169,7 +144,6 @@ function [valsOut, occupiedToFull] = expand_regular_axis_values(occupiedVals, cl
     if isempty(posDiffs)
         return;
     end
-
     baseStep = min(posDiffs);
     if ~isfinite(baseStep) || baseStep <= 0
         return;
@@ -184,184 +158,12 @@ function [valsOut, occupiedToFull] = expand_regular_axis_values(occupiedVals, cl
     end
 
     nFull = fullIdx(end);
-    if nFull <= n
-        return;
-    end
-
-    % Guard against accidental expansion on nonuniform coordinates. The shell
-    % grids used here are regular, so real gaps should be integer multiples of
-    % the native spacing.
-    if nFull > max(4 * n, n + 256)
+    if nFull <= n || nFull > max(4 * n, n + 256)
         return;
     end
 
     valsOut = occupiedVals(1) + transpose(0:(nFull - 1)) .* baseStep;
     occupiedToFull = fullIdx(:);
-end
-
-function perim = find_perimeter_pixels(mask)
-    [nRows, nCols] = size(mask);
-    perim = false(nRows, nCols);
-    [rows, cols] = find(mask);
-    for k = 1:numel(rows)
-        r = rows(k);
-        c = cols(k);
-        neigh = [r-1 c; r+1 c; r c-1; r c+1];
-        for j = 1:size(neigh, 1)
-            rr = neigh(j, 1);
-            cc = neigh(j, 2);
-            if rr < 1 || rr > nRows || cc < 1 || cc > nCols || ~mask(rr, cc)
-                perim(r, c) = true;
-                break;
-            end
-        end
-    end
-end
-
-function distMap = multi_source_grid_distance(mask, seedMask)
-    [nRows, nCols] = size(mask);
-    distMap = inf(nRows, nCols);
-    seedMask = logical(seedMask) & logical(mask);
-    queue = zeros(nnz(mask), 2);
-    qHead = 1;
-    qTail = 0;
-
-    [seedRows, seedCols] = find(seedMask);
-    for k = 1:numel(seedRows)
-        r = seedRows(k);
-        c = seedCols(k);
-        distMap(r, c) = 0;
-        qTail = qTail + 1;
-        queue(qTail, :) = [r, c];
-    end
-
-    if qTail == 0
-        return;
-    end
-
-    neigh = [-1 0; 1 0; 0 -1; 0 1; -1 -1; -1 1; 1 -1; 1 1];
-    while qHead <= qTail
-        r = queue(qHead, 1);
-        c = queue(qHead, 2);
-        qHead = qHead + 1;
-        base = distMap(r, c);
-
-        for j = 1:size(neigh, 1)
-            rr = r + neigh(j, 1);
-            cc = c + neigh(j, 2);
-            if rr < 1 || rr > nRows || cc < 1 || cc > nCols || ~mask(rr, cc)
-                continue;
-            end
-            cand = base + 1;
-            if cand < distMap(rr, cc)
-                distMap(rr, cc) = cand;
-                qTail = qTail + 1;
-                queue(qTail, :) = [rr, cc];
-            end
-        end
-    end
-end
-
-function [radiusMap, thicknessMap, spacingInfo] = compute_physical_radius_map(mask, ~, xVals, yVals)
-    [nRows, nCols] = size(mask);
-    radiusMap    = zeros(nRows, nCols);
-    thicknessMap = zeros(nRows, nCols);
-
-    dx = diff(sort(xVals(:)));
-    dy = diff(sort(yVals(:)));
-    dx = dx(dx > 0);
-    dy = dy(dy > 0);
-    spacingInfo = struct();
-    spacingInfo.dx = median_or_nan(dx);
-    spacingInfo.dy = median_or_nan(dy);
-    spacingInfo.h = median_or_nan([dx(:); dy(:)]);
-
-    if ~any(mask(:)) || ~isfinite(spacingInfo.h) || spacingInfo.h <= 0
-        return;
-    end
-
-    % Tile 3x3 so bwdist sees periodic continuation of the material.
-    % Prevents domain edges from acting as material boundary for periodic
-    % spinodoid geometries. Extract the centre tile after the transform.
-    tiled = repmat(logical(mask), 3, 3);
-    distTiled = bwdist(~tiled, 'euclidean');
-    distPix = distTiled((nRows + 1):(2 * nRows), (nCols + 1):(2 * nCols));
-
-    radiusMap(mask)    = double(distPix(mask)) * spacingInfo.h;
-    thicknessMap(mask) = 2 * radiusMap(mask);
-end
-
-function out = median_or_nan(vals)
-    vals = vals(isfinite(vals));
-    if isempty(vals)
-        out = NaN;
-    else
-        out = median(vals);
-    end
-end
-
-function graphOut = attach_full_graph_thickness(graphIn, xBin, yBin, radiusMap, thicknessMap)
-    graphOut = graphIn;
-    n = numel(graphIn.node_labels);
-    radius = zeros(n, 1);
-    thickness = zeros(n, 1);
-    for i = 1:n
-        radius(i) = radiusMap(yBin(i), xBin(i));
-        thickness(i) = thicknessMap(yBin(i), xBin(i));
-    end
-
-    graphOut.node_radius = radius(:);
-    graphOut.node_thickness = thickness(:);
-
-    if ~isfield(graphOut, 'node_data_table') || ~istable(graphOut.node_data_table) || height(graphOut.node_data_table) ~= n
-        graphOut.node_data_table = table(graphOut.node_labels(:), 'VariableNames', {'Label'});
-    end
-    graphOut.node_data_table = upsert_table_column(graphOut.node_data_table, 'Radius', radius(:));
-    graphOut.node_data_table = upsert_table_column(graphOut.node_data_table, 'Thickness', thickness(:));
-end
-
-function skel = skeletonize_component(mask)
-    mask = logical(mask);
-    if ~any(mask(:))
-        skel = false(size(mask));
-        return;
-    end
-    try
-        skel = bwmorph(mask, 'skel', Inf);
-    catch
-        try
-            skel = bwskel(mask, 'MinBranchLength', 0);
-        catch
-            skel = bwskel(mask);
-        end
-    end
-    skel = logical(skel);
-end
-
-function skelOut = enforce_component_representatives(skelMask, occMask, distMap, minIslandNodes)
-    skelOut = skelMask;
-
-    occComponents = connected_components_binary(occMask, 8);
-    for compId = 1:max(occComponents(:))
-        compMask = occComponents == compId;
-        if ~any(compMask(:))
-            continue;
-        end
-
-        skelCount = nnz(skelOut & compMask);
-        if skelCount >= minIslandNodes
-            continue;
-        end
-
-        compIdx = find(compMask);
-        compDist = distMap(compIdx);
-        if all(isinf(compDist))
-            [~, pickRel] = min(compIdx);
-        else
-            [~, pickRel] = max(compDist);
-        end
-        skelOut(compIdx(pickRel)) = true;
-    end
 end
 
 function labels = periodic_components(mask)
@@ -381,98 +183,154 @@ function labels = periodic_components(mask)
     labels = reshape(remap(ic), nRows, nCols);
 end
 
-function labels = connected_components_binary(mask, conn)
-    if nargin < 2
-        conn = 8;
-    end
+function distMap = multi_source_grid_distance(mask, seedMask)
     [nRows, nCols] = size(mask);
-    labels = zeros(nRows, nCols);
-    current = 0;
+    distMap = inf(nRows, nCols);
+    seedMask = logical(seedMask) & logical(mask);
+
+    [seedRows, seedCols] = find(seedMask);
+    nSeeds = numel(seedRows);
     queue = zeros(nnz(mask), 2);
-    if conn == 4
-        neigh = [-1 0; 1 0; 0 -1; 0 1];
-    else
-        neigh = [-1 0; 1 0; 0 -1; 0 1; -1 -1; -1 1; 1 -1; 1 1];
+    queue(1:nSeeds, :) = [seedRows, seedCols];
+    if nSeeds > 0
+        distMap(sub2ind([nRows, nCols], seedRows, seedCols)) = 0;
+    end
+    qHead = 1;
+    qTail = nSeeds;
+    if qTail == 0
+        return;
     end
 
-    [rows, cols] = find(mask);
-    for seedIdx = 1:numel(rows)
-        r0 = rows(seedIdx);
-        c0 = cols(seedIdx);
-        if labels(r0, c0) ~= 0
-            continue;
-        end
-
-        current = current + 1;
-        qHead = 1;
-        qTail = 1;
-        queue(1, :) = [r0, c0];
-        labels(r0, c0) = current;
-
-        while qHead <= qTail
-            r = queue(qHead, 1);
-            c = queue(qHead, 2);
-            qHead = qHead + 1;
-
-            for j = 1:size(neigh, 1)
-                rr = r + neigh(j, 1);
-                cc = c + neigh(j, 2);
-                if rr < 1 || rr > nRows || cc < 1 || cc > nCols
-                    continue;
-                end
-                if ~mask(rr, cc) || labels(rr, cc) ~= 0
-                    continue;
-                end
+    neigh = [-1 0; 1 0; 0 -1; 0 1; -1 -1; -1 1; 1 -1; 1 1];
+    while qHead <= qTail
+        r = queue(qHead, 1);
+        c = queue(qHead, 2);
+        qHead = qHead + 1;
+        base = distMap(r, c);
+        for j = 1:size(neigh, 1)
+            rr = r + neigh(j, 1);
+            cc = c + neigh(j, 2);
+            if rr < 1 || rr > nRows || cc < 1 || cc > nCols || ~mask(rr, cc)
+                continue;
+            end
+            if base + 1 < distMap(rr, cc)
+                distMap(rr, cc) = base + 1;
                 qTail = qTail + 1;
                 queue(qTail, :) = [rr, cc];
-                labels(rr, cc) = current;
             end
         end
     end
 end
 
-function [skelGraph, debugData] = build_skeleton_graph_from_mask(skelMask, componentAt, nodeAt, xyFull, fullLabels, fullNodeData, distMap, parentKind, fullRadius, fullThickness)
+function [radiusMap, thicknessMap] = compute_physical_radius_map(mask, xVals, yVals)
+    [nRows, nCols] = size(mask);
+    radiusMap    = zeros(nRows, nCols);
+    thicknessMap = zeros(nRows, nCols);
+
+    dx = diff(sort(xVals(:)));
+    dy = diff(sort(yVals(:)));
+    allDiffs = [dx(dx > 0); dy(dy > 0)];
+    allDiffs = allDiffs(isfinite(allDiffs));
+    if isempty(allDiffs)
+        return;
+    end
+    h = median(allDiffs);
+    if ~any(mask(:)) || ~isfinite(h) || h <= 0
+        return;
+    end
+
+    % Tile 3x3 so bwdist sees periodic continuation of the material.
+    tiled = repmat(logical(mask), 3, 3);
+    distTiled = bwdist(~tiled, 'euclidean');
+    distPix = distTiled((nRows + 1):(2 * nRows), (nCols + 1):(2 * nCols));
+
+    radiusMap(mask)    = double(distPix(mask)) * h;
+    thicknessMap(mask) = 2 * radiusMap(mask);
+end
+
+function graphOut = attach_full_graph_thickness(graphIn, xBin, yBin, radiusMap, thicknessMap)
+    graphOut = graphIn;
+    n = numel(graphIn.node_labels);
+    radius    = zeros(n, 1);
+    thickness = zeros(n, 1);
+    for i = 1:n
+        radius(i)    = radiusMap(yBin(i), xBin(i));
+        thickness(i) = thicknessMap(yBin(i), xBin(i));
+    end
+    graphOut.node_radius    = radius;
+    graphOut.node_thickness = thickness;
+
+    if ~isfield(graphOut, 'node_data_table') || ~istable(graphOut.node_data_table) ...
+            || height(graphOut.node_data_table) ~= n
+        graphOut.node_data_table = table(graphOut.node_labels(:), 'VariableNames', {'Label'});
+    end
+    graphOut.node_data_table.Radius    = radius;
+    graphOut.node_data_table.Thickness = thickness;
+end
+
+function skel = skeletonize(mask)
+    mask = logical(mask);
+    if ~any(mask(:))
+        skel = false(size(mask));
+        return;
+    end
+    try
+        skel = bwmorph(mask, 'skel', Inf);
+    catch
+        skel = bwskel(mask);
+    end
+    skel = logical(skel);
+end
+
+% =========================================================================
+% Skeleton graph
+% =========================================================================
+
+function skelGraph = build_skeleton_graph(skelMask, componentAt, nodeAt, xyFull, fullLabels, fullRadius, fullThickness)
     skelLinear = find(skelMask);
     nSkel = numel(skelLinear);
     if nSkel == 0
-        error('extract_structural_graph:EmptySkeleton', ...
-            'Skeleton extraction produced no nodes.');
+        error('extract_structural_graph:EmptySkeleton', 'Skeleton extraction produced no nodes.');
     end
 
     fullIdx = nodeAt(skelLinear);
-    coords = xyFull(fullIdx, :);
+    coords  = xyFull(fullIdx, :);
 
     skelLocalAt = zeros(size(skelMask));
     skelLocalAt(skelLinear) = 1:nSkel;
 
+    % Half-circle 8-connected neighbours so each edge is emitted once.
     dirs = [0 1; 1 -1; 1 0; 1 1];
-    edges = zeros(0, 2);
-    lengths = zeros(0, 1);
+    [nRows, nCols] = size(skelMask);
+    maxEdges = nSkel * size(dirs, 1);
+    edges = zeros(maxEdges, 2);
+    lengths = zeros(maxEdges, 1);
+    nE = 0;
     for i = 1:nSkel
-        [r, c] = ind2sub(size(skelMask), skelLinear(i));
+        [r, c] = ind2sub([nRows, nCols], skelLinear(i));
         thisComp = componentAt(r, c);
         if thisComp == 0
             continue;
         end
-
-        % --- immediate 8-conn neighbours ---
         for d = 1:size(dirs, 1)
             rr = r + dirs(d, 1);
             cc = c + dirs(d, 2);
-            if rr < 1 || rr > size(skelMask, 1) || cc < 1 || cc > size(skelMask, 2)
+            if rr < 1 || rr > nRows || cc < 1 || cc > nCols
                 continue;
             end
             if componentAt(rr, cc) ~= thisComp
                 continue;
             end
             if abs(dirs(d, 1)) == 1 && abs(dirs(d, 2)) == 1
-                % If an orthogonal skeleton pixel already connects this corner,
-                % the diagonal edge creates a tiny artificial triangle.
-                if has_orthogonal_skeleton_corner_path(skelLocalAt, componentAt, r, c, rr, cc, thisComp)
+                % Avoid tiny triangles when an orthogonal skeleton pixel
+                % already connects this corner, and avoid corner-touch
+                % shortcuts across distinct components.
+                onOrthSkel = (componentAt(r, cc) == thisComp && skelLocalAt(r, cc) > 0) || ...
+                             (componentAt(rr, c) == thisComp && skelLocalAt(rr, c) > 0);
+                if onOrthSkel
                     continue;
                 end
-                % Prevent corner-touch shortcuts across distinct spinodal regions.
-                if ~supports_diagonal_link(componentAt, r, c, rr, cc, thisComp)
+                if componentAt(r, cc) ~= thisComp && componentAt(rr, c) ~= thisComp
                     continue;
                 end
             end
@@ -480,142 +338,63 @@ function [skelGraph, debugData] = build_skeleton_graph_from_mask(skelMask, compo
             if j == 0
                 continue;
             end
-            edges(end + 1, :) = [i, j]; %#ok<AGROW>
-            lengths(end + 1, 1) = norm(coords(i, :) - coords(j, :)); %#ok<AGROW>
+            nE = nE + 1;
+            edges(nE, :) = [i, j];
+            lengths(nE) = norm(coords(i, :) - coords(j, :));
         end
     end
-
-    if isempty(edges)
-        G = graph([], [], [], nSkel);
-    else
-        G = graph(edges(:, 1), edges(:, 2), lengths, nSkel);
-    end
-
-    role = repmat("waypoint", nSkel, 1);
-    deg = degree(G);
-    role(deg == 0) = "island";
-    role(deg == 1) = "endpoint";
-    role(deg > 2) = "junction";
-    role(deg == 2) = "chain";
+    edges = edges(1:nE, :);
+    lengths = lengths(1:nE);
 
     skelGraph = struct();
-    skelGraph.kind = 'skeleton_graph';
-    skelGraph.parent_kind = parentKind;
-    skelGraph.node_coords = coords;
-    skelGraph.node_labels = fullLabels(fullIdx);
-    skelGraph.num_nodes = nSkel;
-    skelGraph.edges_local = edges;
-    skelGraph.edge_index = edges.';
-    skelGraph.edge_length = lengths;
-    skelGraph.graph = G;
-    skelGraph.boundary_mask = false(nSkel, 1);
+    skelGraph.node_coords    = coords;
+    skelGraph.node_labels    = fullLabels(fullIdx);
+    skelGraph.num_nodes      = nSkel;
+    skelGraph.edges_local    = edges;
+    skelGraph.edge_length    = lengths;
     skelGraph.full_node_indices = fullIdx(:);
-    skelGraph.full_node_labels = fullLabels(fullIdx);
-    skelGraph.grid_linear_index = skelLinear(:);
-    skelGraph.boundary_step_distance = distMap(skelLinear);
-    skelGraph.node_radius = fullRadius(fullIdx);
+    skelGraph.node_radius    = fullRadius(fullIdx);
     skelGraph.node_thickness = fullThickness(fullIdx);
-    skelTable = table( ...
+    skelGraph.node_data_table = table( ...
         skelGraph.node_labels(:), ...
-        skelGraph.full_node_indices(:), ...
-        skelGraph.boundary_step_distance(:), ...
-        skelGraph.node_radius(:), ...
-        skelGraph.node_thickness(:), ...
-        role(:), ...
-        'VariableNames', {'Label', 'FullNodeIndex', 'BoundaryStepDistance', 'Radius', 'Thickness', 'SkeletonRole'});
-    if istable(fullNodeData) && height(fullNodeData) == size(xyFull, 1)
-        attrTable = fullNodeData(fullIdx, :);
-        if any(strcmp(attrTable.Properties.VariableNames, 'Label'))
-            attrTable(:, 'Label') = [];
-        end
-        dupNames = intersect(attrTable.Properties.VariableNames, skelTable.Properties.VariableNames, 'stable');
-        if ~isempty(dupNames)
-            attrTable(:, dupNames) = [];
-        end
-        skelTable = [skelTable, attrTable];
-    end
-    skelGraph.node_data_table = skelTable;
-
-    debugData = struct();
-    debugData.skelLocalAtGrid = skelLocalAt;
+        skelGraph.full_node_indices, ...
+        skelGraph.node_radius, ...
+        skelGraph.node_thickness, ...
+        'VariableNames', {'Label', 'FullNodeIndex', 'Radius', 'Thickness'});
 end
 
-function [graphOut, pruneDebug] = prune_radius_covered_skeleton_spurs(graphIn, radiusFactor)
-    graphOut = graphIn;
-    pruneDebug = struct( ...
-        'applied', false, ...
-        'radius_factor', radiusFactor, ...
-        'iterations_used', 0, ...
-        'pruned_branch_count', 0, ...
-        'pruned_node_count', 0, ...
-        'pruned_branch_lengths', zeros(0, 1), ...
-        'pruned_root_radii', zeros(0, 1), ...
-        'pruned_full_node_indices', zeros(0, 1));
-
-    if radiusFactor <= 0 || graphIn.num_nodes < 2 || isempty(graphIn.edges_local) ...
-            || ~isfield(graphIn, 'node_radius') || numel(graphIn.node_radius) ~= graphIn.num_nodes
+function skelGraph = prune_radius_covered_spurs(skelGraph, radiusFactor)
+    if radiusFactor <= 0 || skelGraph.num_nodes < 2 || isempty(skelGraph.edges_local)
         return;
     end
 
-    % Only prune branches that are terminal in the original skeleton. Repeating
-    % this pass can walk back into real local bulge branches after a tiny stub
-    % has been removed.
-    maxIterations = 1;
-    for iter = 1:maxIterations
-        G = graphOut.graph;
-        deg = degree(G);
-        endpoints = find(deg == 1);
-        removeMask = false(graphOut.num_nodes, 1);
-        branchLengths = zeros(0, 1);
-        rootRadii = zeros(0, 1);
+    n = skelGraph.num_nodes;
+    G = graph(skelGraph.edges_local(:, 1), skelGraph.edges_local(:, 2), [], n);
+    deg = degree(G);
+    endpoints = find(deg == 1);
+    removeMask = false(n, 1);
 
-        for i = 1:numel(endpoints)
-            [path, root] = trace_terminal_skeleton_branch(G, deg, endpoints(i));
-            if isempty(path) || root < 1 || deg(root) <= 2
-                continue;
-            end
-
-            rootRadius = graphOut.node_radius(root);
-            if ~isfinite(rootRadius) || rootRadius <= 0
-                continue;
-            end
-
-            branchLength = path_length(graphOut.node_coords(path, 1:2));
-            if branchLength <= radiusFactor * rootRadius
-                removeMask(path(1:end - 1)) = true;
-                branchLengths(end + 1, 1) = branchLength; %#ok<AGROW>
-                rootRadii(end + 1, 1) = rootRadius; %#ok<AGROW>
-            end
+    for i = 1:numel(endpoints)
+        [path, root] = trace_terminal_branch(G, deg, endpoints(i));
+        if isempty(path) || root < 1 || deg(root) <= 2
+            continue;
         end
-
-        if ~any(removeMask)
-            pruneDebug.iterations_used = iter - 1;
-            break;
+        rootRadius = skelGraph.node_radius(root);
+        if ~isfinite(rootRadius) || rootRadius <= 0
+            continue;
         end
-
-        removedFull = zeros(0, 1);
-        if isfield(graphOut, 'full_node_indices') && numel(graphOut.full_node_indices) == graphOut.num_nodes
-            removedFull = graphOut.full_node_indices(removeMask);
+        if path_length(skelGraph.node_coords(path, 1:2)) <= radiusFactor * rootRadius
+            removeMask(path(1:end - 1)) = true;
         end
+    end
 
-        graphOut = remove_skeleton_nodes(graphOut, removeMask);
-        pruneDebug.applied = true;
-        pruneDebug.iterations_used = iter;
-        pruneDebug.pruned_branch_count = pruneDebug.pruned_branch_count + numel(branchLengths);
-        pruneDebug.pruned_node_count = pruneDebug.pruned_node_count + nnz(removeMask);
-        pruneDebug.pruned_branch_lengths = [pruneDebug.pruned_branch_lengths; branchLengths]; %#ok<AGROW>
-        pruneDebug.pruned_root_radii = [pruneDebug.pruned_root_radii; rootRadii]; %#ok<AGROW>
-        pruneDebug.pruned_full_node_indices = unique([pruneDebug.pruned_full_node_indices; removedFull(:)], 'stable');
-
-        if graphOut.num_nodes < 2 || isempty(graphOut.edges_local)
-            break;
-        end
+    if any(removeMask)
+        skelGraph = remove_skeleton_nodes(skelGraph, removeMask);
     end
 end
 
-function [path, root] = trace_terminal_skeleton_branch(G, deg, endpoint)
+function [path, root] = trace_terminal_branch(G, deg, endpoint)
     path = endpoint;
-    root = endpoint;
     prev = 0;
     curr = endpoint;
     while true
@@ -636,370 +415,239 @@ function [path, root] = trace_terminal_skeleton_branch(G, deg, endpoint)
     end
 end
 
-function graphOut = remove_skeleton_nodes(graphIn, removeMask)
-    graphOut = graphIn;
-    removeMask = logical(removeMask(:));
-    keepMask = ~removeMask;
+function skelGraph = remove_skeleton_nodes(skelGraph, removeMask)
+    keepMask = ~removeMask(:);
     oldToNew = zeros(numel(keepMask), 1);
     oldToNew(keepMask) = 1:nnz(keepMask);
 
-    graphOut.node_coords = graphIn.node_coords(keepMask, :);
-    graphOut.node_labels = graphIn.node_labels(keepMask);
-    graphOut.num_nodes = nnz(keepMask);
+    skelGraph.node_coords       = skelGraph.node_coords(keepMask, :);
+    skelGraph.node_labels       = skelGraph.node_labels(keepMask);
+    skelGraph.num_nodes         = nnz(keepMask);
+    skelGraph.full_node_indices = skelGraph.full_node_indices(keepMask);
+    skelGraph.node_radius       = skelGraph.node_radius(keepMask);
+    skelGraph.node_thickness    = skelGraph.node_thickness(keepMask);
+    skelGraph.node_data_table   = skelGraph.node_data_table(keepMask, :);
 
-    optionalNodeFields = {'boundary_mask', 'full_node_indices', 'full_node_labels', ...
-        'grid_linear_index', 'boundary_step_distance', 'node_radius', 'node_thickness'};
-    for i = 1:numel(optionalNodeFields)
-        fieldName = optionalNodeFields{i};
-        if isfield(graphOut, fieldName) && numel(graphOut.(fieldName)) == numel(keepMask)
-            graphOut.(fieldName) = graphOut.(fieldName)(keepMask);
-        end
+    if isempty(skelGraph.edges_local)
+        return;
     end
-
-    if isfield(graphOut, 'node_data_table') && istable(graphOut.node_data_table) ...
-            && height(graphOut.node_data_table) == numel(keepMask)
-        graphOut.node_data_table = graphOut.node_data_table(keepMask, :);
-    end
-
-    if isempty(graphIn.edges_local)
-        edges = zeros(0, 2);
-    else
-        edgeKeep = ~removeMask(graphIn.edges_local(:, 1)) & ~removeMask(graphIn.edges_local(:, 2));
-        edges = graphIn.edges_local(edgeKeep, :);
-        if ~isempty(edges)
-            edges = oldToNew(edges);
-            edges = edges(edges(:, 1) ~= edges(:, 2), :);
-        end
-    end
-
-    graphOut.edges_local = edges;
-    graphOut.edge_index = edges.';
-    graphOut.edge_length = skeleton_edge_lengths(graphOut.node_coords, edges);
+    edges = skelGraph.edges_local;
+    edgeKeep = ~removeMask(edges(:, 1)) & ~removeMask(edges(:, 2));
+    edges = oldToNew(edges(edgeKeep, :));
+    edges = edges(edges(:, 1) ~= edges(:, 2), :);
+    skelGraph.edges_local = edges;
     if isempty(edges)
-        graphOut.graph = graph([], [], [], graphOut.num_nodes);
+        skelGraph.edge_length = zeros(0, 1);
     else
-        graphOut.graph = graph(edges(:, 1), edges(:, 2), graphOut.edge_length, graphOut.num_nodes);
-    end
-
-    deg = degree(graphOut.graph);
-    role = skeleton_roles_from_degree(deg);
-    if isfield(graphOut, 'node_data_table') && istable(graphOut.node_data_table) ...
-            && height(graphOut.node_data_table) == graphOut.num_nodes ...
-            && any(strcmp(graphOut.node_data_table.Properties.VariableNames, 'SkeletonRole'))
-        graphOut.node_data_table.SkeletonRole = role;
+        delta = skelGraph.node_coords(edges(:, 1), 1:2) - skelGraph.node_coords(edges(:, 2), 1:2);
+        skelGraph.edge_length = sqrt(sum(delta .^ 2, 2));
     end
 end
 
-function lengths = skeleton_edge_lengths(coords, edges)
-    lengths = zeros(size(edges, 1), 1);
-    if isempty(edges)
-        return;
-    end
-    delta = coords(edges(:, 1), 1:2) - coords(edges(:, 2), 1:2);
-    lengths = sqrt(sum(delta .^ 2, 2));
-end
+% =========================================================================
+% Compress chains -> structural graph
+% =========================================================================
 
-function role = skeleton_roles_from_degree(deg)
-    role = repmat("waypoint", numel(deg), 1);
-    role(deg == 0) = "island";
-    role(deg == 1) = "endpoint";
-    role(deg == 2) = "chain";
-    role(deg > 2) = "junction";
-end
-
-function [mask, skelLocalAt] = skeleton_mask_from_graph(skeletonGraph, maskSize)
-    mask = false(maskSize);
-    skelLocalAt = zeros(maskSize);
-    if isfield(skeletonGraph, 'grid_linear_index') && numel(skeletonGraph.grid_linear_index) == skeletonGraph.num_nodes
-        gridIdx = skeletonGraph.grid_linear_index(:);
-        valid = gridIdx >= 1 & gridIdx <= prod(maskSize);
-        mask(gridIdx(valid)) = true;
-        skelLocalAt(gridIdx(valid)) = find(valid);
-    end
-end
-
-function tf = supports_diagonal_link(componentAt, r0, c0, r1, c1, compId)
-    tf = true;
-    if abs(r1 - r0) ~= 1 || abs(c1 - c0) ~= 1
-        return;
-    end
-    tf = componentAt(r0, c1) == compId || componentAt(r1, c0) == compId;
-end
-
-function tf = has_orthogonal_skeleton_corner_path(skelLocalAt, componentAt, r0, c0, r1, c1, compId)
-    tf = false;
-    if abs(r1 - r0) ~= 1 || abs(c1 - c0) ~= 1
-        return;
-    end
-    tf = (componentAt(r0, c1) == compId && skelLocalAt(r0, c1) > 0) || ...
-         (componentAt(r1, c0) == compId && skelLocalAt(r1, c0) > 0);
-end
-
-function structGraph = compress_skeleton_graph(skelGraph, detailLevel)
+function structGraph = compress_skeleton(skelGraph, detailLevel)
     nSkel = skelGraph.num_nodes;
     if nSkel == 0
         error('extract_structural_graph:EmptySkeletonGraph', 'Skeleton graph has no nodes.');
     end
 
+    % Shared mutable state (nested fns mutate these via shared workspace).
+    reducedForSkel = zeros(nSkel, 1);
+    skelForReduced = zeros(0, 1);
+    edgePairs    = zeros(0, 2);
+    edgeLengths  = zeros(0, 1);
+    edgePolyline = {};
+    edgeFullPath = {};
+
     if isempty(skelGraph.edges_local)
-        structGraph = build_struct_graph_from_segments( ...
-            skelGraph, detailLevel, zeros(0, 2), zeros(0, 1), {}, {}, zeros(0, 1), ...
-            repmat("island", nSkel, 1), nSkel);
-        structGraph.node_coords = skelGraph.node_coords;
-        structGraph.node_labels = skelGraph.node_labels(:);
-        structGraph.num_nodes = nSkel;
-        structGraph.full_node_indices = skelGraph.full_node_indices(:);
-        structGraph.full_node_labels = skelGraph.full_node_labels(:);
-        structGraph.reduced_node_to_full_indices = skelGraph.full_node_indices(:);
-        structGraph.reduced_node_to_skeleton_indices = transpose(1:nSkel);
-        structGraph.boundary_mask = false(nSkel, 1);
-        if isfield(skelGraph, 'node_radius')
-            structGraph.node_radius = skelGraph.node_radius(:);
-        end
-        if isfield(skelGraph, 'node_thickness')
-            structGraph.node_thickness = skelGraph.node_thickness(:);
-        end
-        structGraph.node_data_table = table( ...
-            structGraph.node_labels(:), ...
-            structGraph.full_node_indices(:), ...
-            repmat("island", nSkel, 1), ...
-            'VariableNames', {'Label', 'FullNodeIndex', 'NodeRole'});
-        if isfield(skelGraph, 'node_data_table') && istable(skelGraph.node_data_table) ...
-                && height(skelGraph.node_data_table) == nSkel
-            attrTable = skelGraph.node_data_table;
-            if any(strcmp(attrTable.Properties.VariableNames, 'Label'))
-                attrTable(:, 'Label') = [];
-            end
-            dupNames = intersect(attrTable.Properties.VariableNames, structGraph.node_data_table.Properties.VariableNames, 'stable');
-            if ~isempty(dupNames)
-                attrTable(:, dupNames) = [];
-            end
-            attrTable.SkeletonNodeIndex = transpose(1:nSkel);
-            structGraph.node_data_table = [structGraph.node_data_table, attrTable];
-        end
+        % All-islands case: every skeleton node becomes a structural node.
+        skelForReduced = transpose(1:nSkel);
+        structGraph = finalize_structural(skelGraph, skelForReduced, ...
+            zeros(0, 2), zeros(0, 1), {}, {});
         return;
     end
 
-    G = skelGraph.graph;
+    G = graph(skelGraph.edges_local(:, 1), skelGraph.edges_local(:, 2), [], nSkel);
     deg = degree(G);
-    nEdge = size(skelGraph.edges_local, 1);
+    nE = size(skelGraph.edges_local, 1);
     edgeLookup = sparse([skelGraph.edges_local(:, 1); skelGraph.edges_local(:, 2)], ...
-        [skelGraph.edges_local(:, 2); skelGraph.edges_local(:, 1)], ...
-        [(1:nEdge).'; (1:nEdge).'], ...
-        nSkel, nSkel);
-    visited = false(size(skelGraph.edges_local, 1), 1);
+                        [skelGraph.edges_local(:, 2); skelGraph.edges_local(:, 1)], ...
+                        [(1:nE).'; (1:nE).'], nSkel, nSkel);
+    visited = false(nE, 1);
     compId = conncomp(G);
-
-    reducedNodeForSkel = zeros(nSkel, 1);
-    reducedSkelForNode = zeros(0, 1);
-    reducedCoords = zeros(0, 2);
-    reducedLabels = zeros(0, 1);
-    reducedFullIdx = zeros(0, 1);
-    reducedRole = strings(0, 1);
-
-    edgePairs = zeros(0, 2);
-    edgeLengths = zeros(0, 1);
-    edgePolyline = {};
-    edgeFullPath = {};
-    edgeComp = zeros(0, 1);
 
     for c = 1:max(compId)
         compNodes = find(compId == c);
-        compKey = compNodes(deg(compNodes) ~= 2);
+        anchors = compNodes(deg(compNodes) ~= 2);
 
-        if isempty(compKey)
-            cyclePath = trace_pure_cycle(compNodes, G, edgeLookup);
-            add_closed_path(cyclePath, c);
+        if isempty(anchors)
+            cyclePath = trace_pure_cycle(compNodes, G);
+            emit_cycle(cyclePath);
             continue;
         end
 
-        compKey = sort(compKey(:)).';
-        for u = compKey
+        anchors = sort(anchors(:)).';
+        for u = anchors
             nbrs = sort(neighbors(G, u)).';
-            if isempty(nbrs)
-                ensure_reduced_node(u);
-                continue;
-            end
             for v = nbrs
                 eIdx = edgeLookup(u, v);
                 if eIdx == 0 || visited(eIdx)
                     continue;
                 end
                 path = trace_chain(u, v, G, deg, edgeLookup, visited);
-                pathEdgeIds = path_to_edge_ids(path, edgeLookup);
-                visited(pathEdgeIds) = true;
+                pathEdges = path_to_edge_ids(path, edgeLookup);
+                visited(pathEdges) = true;
                 if path(1) == path(end)
-                    add_closed_path(path, c);
+                    emit_cycle(path);
                 else
-                    add_open_path(path, c);
+                    emit_open(path);
                 end
             end
         end
     end
 
+    % Any remaining unvisited edges form free chains (rare/degenerate).
     freeEdges = find(~visited);
     while ~isempty(freeEdges)
         startEdge = freeEdges(1);
         u = skelGraph.edges_local(startEdge, 1);
         v = skelGraph.edges_local(startEdge, 2);
-        cyclePath = trace_chain(u, v, G, deg, edgeLookup, visited);
-        pathEdgeIds = path_to_edge_ids(cyclePath, edgeLookup);
-        visited(pathEdgeIds) = true;
-        if cyclePath(1) == cyclePath(end)
-            add_closed_path(cyclePath, compId(u));
+        path = trace_chain(u, v, G, deg, edgeLookup, visited);
+        pathEdges = path_to_edge_ids(path, edgeLookup);
+        visited(pathEdges) = true;
+        if path(1) == path(end)
+            emit_cycle(path);
         else
-            add_open_path(cyclePath, compId(u));
+            emit_open(path);
         end
         freeEdges = find(~visited);
     end
 
-    structGraph = build_struct_graph_from_segments( ...
-        skelGraph, detailLevel, edgePairs, edgeLengths, edgePolyline, edgeFullPath, edgeComp, ...
-        reducedRole, size(reducedCoords, 1));
+    structGraph = finalize_structural(skelGraph, skelForReduced, ...
+        edgePairs, edgeLengths, edgePolyline, edgeFullPath);
 
-    structGraph.node_coords = reducedCoords;
-    structGraph.node_labels = reducedLabels;
-    structGraph.num_nodes = size(reducedCoords, 1);
-    structGraph.full_node_indices = reducedFullIdx;
-    structGraph.full_node_labels = reducedLabels;
-    structGraph.reduced_node_to_full_indices = reducedFullIdx;
-    structGraph.reduced_node_to_skeleton_indices = reducedSkelForNode;
-    structGraph.boundary_mask = false(structGraph.num_nodes, 1);
-    if isfield(skelGraph, 'node_radius')
-        structGraph.node_radius = skelGraph.node_radius(reducedSkelForNode);
-    end
-    if isfield(skelGraph, 'node_thickness')
-        structGraph.node_thickness = skelGraph.node_thickness(reducedSkelForNode);
-    end
-    structTable = table( ...
-        structGraph.node_labels(:), ...
-        structGraph.full_node_indices(:), ...
-        reducedRole(:), ...
-        'VariableNames', {'Label', 'FullNodeIndex', 'NodeRole'});
-    if isfield(skelGraph, 'node_data_table') && istable(skelGraph.node_data_table) ...
-            && height(skelGraph.node_data_table) == skelGraph.num_nodes
-        attrTable = skelGraph.node_data_table(reducedSkelForNode, :);
-        if any(strcmp(attrTable.Properties.VariableNames, 'Label'))
-            attrTable(:, 'Label') = [];
-        end
-        dupNames = intersect(attrTable.Properties.VariableNames, structTable.Properties.VariableNames, 'stable');
-        if ~isempty(dupNames)
-            attrTable(:, dupNames) = [];
-        end
-        attrTable.SkeletonNodeIndex = reducedSkelForNode(:);
-        structTable = [structTable, attrTable];
-    end
-    structGraph.node_data_table = structTable;
+    % --- nested functions: share workspace with compress_skeleton -------------
 
-    function add_open_path(path, componentId)
-        anchorPos = open_path_anchor_positions(path, detailLevel);
-        anchorPos = ensure_anchor_positions(anchorPos, numel(path));
-
-        [anchorPos, forced] = ensure_unique_open_path(anchorPos, path);
-        if forced
-            anchorPos = ensure_anchor_positions(anchorPos, numel(path));
-        end
-
-        for segIdx = 1:(numel(anchorPos) - 1)
-            segPath = path(anchorPos(segIdx):anchorPos(segIdx + 1));
-            add_segment(segPath, componentId);
+    function rIdx = ensure_reduced(sIdx)
+        rIdx = reducedForSkel(sIdx);
+        if rIdx == 0
+            rIdx = numel(skelForReduced) + 1;
+            reducedForSkel(sIdx) = rIdx;
+            skelForReduced(rIdx, 1) = sIdx;
         end
     end
 
-    function add_closed_path(path, componentId)
-        cycleNodes = path(1:end-1);
-        anchorPos = closed_path_anchor_positions(cycleNodes, detailLevel);
-        anchorPos = unique(anchorPos(:).', 'stable');
-        anchorPos = anchorPos(anchorPos >= 1 & anchorPos <= numel(cycleNodes));
-        if numel(anchorPos) < 3
-            anchorPos = unique([1, round(numel(cycleNodes) / 3), round(2 * numel(cycleNodes) / 3)], 'stable');
-            anchorPos = anchorPos(anchorPos >= 1 & anchorPos <= numel(cycleNodes));
-        end
-        if numel(anchorPos) < 3
-            anchorPos = 1:numel(cycleNodes);
-        end
-
-        anchorPos = sort(anchorPos);
-        wrapNodes = [cycleNodes(:); cycleNodes(anchorPos(1))];
-        wrapPos = [anchorPos(:); anchorPos(1) + numel(cycleNodes)];
-        for segIdx = 1:(numel(wrapPos) - 1)
-            posA = wrapPos(segIdx);
-            posB = wrapPos(segIdx + 1);
-            segPath = segment_from_cycle(cycleNodes, posA, posB);
-            add_segment(segPath, componentId);
-        end
-    end
-
-    function add_segment(segPath, componentId)
+    function emit_segment(segPath)
         if numel(segPath) < 2
             return;
         end
-
-        src = ensure_reduced_node(segPath(1));
-        dst = ensure_reduced_node(segPath(end));
+        src = ensure_reduced(segPath(1));
+        dst = ensure_reduced(segPath(end));
         if src == dst
             return;
         end
-
-        edgePairs(end + 1, :) = [src, dst]; %#ok<AGROW>
-        edgeLengths(end + 1, 1) = path_length(skelGraph.node_coords(segPath, :)); %#ok<AGROW>
-        edgePolyline{end + 1, 1} = skelGraph.node_coords(segPath, :); %#ok<AGROW>
-        edgeFullPath{end + 1, 1} = skelGraph.full_node_indices(segPath(:)); %#ok<AGROW>
-        edgeComp(end + 1, 1) = componentId; %#ok<AGROW>
+        edgePairs(end + 1, :)    = [src, dst];
+        edgeLengths(end + 1, 1)  = path_length(skelGraph.node_coords(segPath, :));
+        edgePolyline{end + 1, 1} = skelGraph.node_coords(segPath, :);
+        edgeFullPath{end + 1, 1} = skelGraph.full_node_indices(segPath(:));
     end
 
-    function idx = ensure_reduced_node(skelIdx)
-        idx = reducedNodeForSkel(skelIdx);
-        if idx > 0
-            reducedRole(idx) = promote_role(reducedRole(idx), classify_skeleton_node(skelIdx, deg(skelIdx)));
-            return;
+    function emit_open(path)
+        n = numel(path);
+        nInternal = max(n - 2, 0);
+        nExtra = min(nInternal, round(detailLevel * nInternal));
+        if nExtra == 0
+            anchorsLocal = [1, n];
+        else
+            target = linspace(2, n - 1, nExtra);
+            internal = unique(round(target), 'stable');
+            internal = internal(internal >= 2 & internal <= n - 1);
+            anchorsLocal = [1, internal, n];
+        end
+        anchorsLocal = unique(anchorsLocal, 'stable');
+
+        % Avoid parallel-edge duplication between two existing reduced nodes.
+        if numel(anchorsLocal) == 2 && ~isempty(edgePairs)
+            a = reducedForSkel(path(anchorsLocal(1)));
+            b = reducedForSkel(path(anchorsLocal(2)));
+            if a > 0 && b > 0 && any(all(sort(edgePairs, 2) == sort([a, b]), 2))
+                internal = 2:(n - 1);
+                if ~isempty(internal)
+                    midPos = internal(round((numel(internal) + 1) / 2));
+                    anchorsLocal = [1, midPos, n];
+                end
+            end
         end
 
-        idx = size(reducedCoords, 1) + 1;
-        reducedNodeForSkel(skelIdx) = idx;
-        reducedSkelForNode(idx, 1) = skelIdx; %#ok<AGROW>
-        reducedCoords(idx, :) = skelGraph.node_coords(skelIdx, :); %#ok<AGROW>
-        reducedLabels(idx, 1) = skelGraph.node_labels(skelIdx); %#ok<AGROW>
-        reducedFullIdx(idx, 1) = skelGraph.full_node_indices(skelIdx); %#ok<AGROW>
-        reducedRole(idx, 1) = classify_skeleton_node(skelIdx, deg(skelIdx)); %#ok<AGROW>
+        for s = 1:(numel(anchorsLocal) - 1)
+            emit_segment(path(anchorsLocal(s):anchorsLocal(s + 1)));
+        end
     end
 
-    function [anchorPos, forced] = ensure_unique_open_path(anchorPos, path)
-        forced = false;
-        if numel(anchorPos) ~= 2
+    function emit_cycle(path)
+        if numel(path) > 1 && path(1) == path(end)
+            cycleNodes = path(1:end - 1);
+        else
+            cycleNodes = path;
+        end
+        n = numel(cycleNodes);
+        if n == 0
             return;
         end
+        if n <= 3
+            anchorsLocal = 1:n;
+        else
+            nKeep = min(n, max(3, 1 + round(detailLevel * (n - 1))));
+            if nKeep >= n
+                anchorsLocal = 1:n;
+            else
+                target = linspace(1, n + 1, nKeep + 1);
+                anchorsLocal = unique(min(n, max(1, round(target(1:end - 1)))), 'stable');
+                if numel(anchorsLocal) < 3
+                    anchorsLocal = unique([1, round(n / 3), round(2 * n / 3)], 'stable');
+                end
+            end
+        end
+        anchorsLocal = sort(anchorsLocal);
 
-        a = reducedNodeForSkel(path(anchorPos(1)));
-        b = reducedNodeForSkel(path(anchorPos(2)));
-        if a == 0 || b == 0
-            return;
+        wrapPos = [anchorsLocal(:); anchorsLocal(1) + n];
+        for s = 1:(numel(wrapPos) - 1)
+            idx = mod((wrapPos(s):wrapPos(s + 1)) - 1, n) + 1;
+            emit_segment(cycleNodes(idx));
         end
-
-        pair = sort([a, b]);
-        if isempty(edgePairs)
-            return;
-        end
-        if ~any(all(sort(edgePairs, 2) == pair, 2))
-            return;
-        end
-
-        internal = 2:(numel(path) - 1);
-        if isempty(internal)
-            return;
-        end
-
-        midPos = internal(round((numel(internal) + 1) / 2));
-        anchorPos = [1, midPos, numel(path)];
-        forced = true;
     end
+end
+
+function structGraph = finalize_structural(skelGraph, skelForReduced, edgePairs, edgeLengths, edgePolyline, edgeFullPath)
+    n = numel(skelForReduced);
+    structGraph = struct();
+    structGraph.node_coords    = skelGraph.node_coords(skelForReduced, :);
+    structGraph.node_labels    = skelGraph.node_labels(skelForReduced);
+    structGraph.num_nodes      = n;
+    structGraph.edges_local    = edgePairs;
+    structGraph.edge_index     = edgePairs.';
+    structGraph.edge_length    = edgeLengths;
+    structGraph.edge_polyline  = edgePolyline;
+    structGraph.edge_full_node_paths = edgeFullPath;
+    structGraph.full_node_indices = skelGraph.full_node_indices(skelForReduced);
+    structGraph.reduced_node_to_full_indices = structGraph.full_node_indices;
+    structGraph.node_radius    = skelGraph.node_radius(skelForReduced);
+    structGraph.node_thickness = skelGraph.node_thickness(skelForReduced);
+    structGraph.node_data_table = table( ...
+        structGraph.node_labels(:), ...
+        structGraph.full_node_indices, ...
+        structGraph.node_radius, ...
+        structGraph.node_thickness, ...
+        'VariableNames', {'Label', 'FullNodeIndex', 'Radius', 'Thickness'});
 end
 
 function path = trace_chain(startNode, nextNode, G, deg, edgeLookup, visited)
     path = [startNode, nextNode];
     prev = startNode;
     curr = nextNode;
-
     while true
         if curr == startNode && numel(path) > 2
             break;
@@ -1007,13 +655,11 @@ function path = trace_chain(startNode, nextNode, G, deg, edgeLookup, visited)
         if deg(curr) ~= 2
             break;
         end
-
         nbrs = sort(neighbors(G, curr)).';
         nbrs(nbrs == prev) = [];
         if isempty(nbrs)
             break;
         end
-
         next = nbrs(1);
         eIdx = edgeLookup(curr, next);
         if eIdx == 0
@@ -1022,10 +668,36 @@ function path = trace_chain(startNode, nextNode, G, deg, edgeLookup, visited)
         if visited(eIdx) && next ~= startNode
             break;
         end
-
         path(end + 1) = next; %#ok<AGROW>
         prev = curr;
         curr = next;
+    end
+end
+
+function cyclePath = trace_pure_cycle(compNodes, G)
+    compNodes = sort(compNodes(:)).';
+    startNode = compNodes(1);
+    nbrs = sort(neighbors(G, startNode)).';
+    if isempty(nbrs)
+        cyclePath = startNode;
+        return;
+    end
+    cyclePath = [startNode, nbrs(1)];
+    prev = startNode;
+    curr = nbrs(1);
+    while true
+        nbrs = sort(neighbors(G, curr)).';
+        nbrs(nbrs == prev) = [];
+        if isempty(nbrs)
+            break;
+        end
+        next = nbrs(1);
+        cyclePath(end + 1) = next; %#ok<AGROW>
+        prev = curr;
+        curr = next;
+        if curr == startNode
+            break;
+        end
     end
 end
 
@@ -1037,240 +709,54 @@ function edgeIds = path_to_edge_ids(path, edgeLookup)
     edgeIds = edgeIds(edgeIds > 0);
 end
 
-function cyclePath = trace_pure_cycle(compNodes, G, edgeLookup)
-    compNodes = sort(compNodes(:)).';
-    startNode = compNodes(1);
-    nbrs = sort(neighbors(G, startNode)).';
-    if isempty(nbrs)
-        cyclePath = startNode;
+% =========================================================================
+% Cleanup: contract short edges + merge close junctions
+% =========================================================================
+
+function [g, info] = cleanup_structural(g)
+    info = struct('grid_spacing', NaN, 'min_edge_length', NaN, 'merge_radius', NaN, ...
+        'iterations_used', 0, 'short_edge_contractions', 0, 'cluster_merges', 0);
+
+    if g.num_nodes < 2 || isempty(g.edges_local)
         return;
     end
 
-    cyclePath = [startNode, nbrs(1)];
-    prev = startNode;
-    curr = nbrs(1);
-
-    while true
-        nbrs = sort(neighbors(G, curr)).';
-        nbrs(nbrs == prev) = [];
-        if isempty(nbrs)
-            break;
-        end
-        next = nbrs(1);
-        if edgeLookup(curr, next) == 0
-            break;
-        end
-        cyclePath(end + 1) = next; %#ok<AGROW>
-        prev = curr;
-        curr = next;
-        if curr == startNode
-            break;
-        end
-    end
-end
-
-function pos = open_path_anchor_positions(path, detailLevel)
-    n = numel(path);
-    if n <= 2
-        pos = [1, n];
-        return;
-    end
-
-    nInternal = n - 2;
-    nExtra = min(nInternal, round(detailLevel * nInternal));
-    if nExtra == 0
-        pos = [1, n];
-        return;
-    end
-
-    internalPos = evenly_spaced_internal_positions(n, nExtra);
-    pos = [1, internalPos, n];
-end
-
-function pos = closed_path_anchor_positions(cycleNodes, detailLevel)
-    n = numel(cycleNodes);
-    if n <= 3
-        pos = 1:n;
-        return;
-    end
-
-    nKeep = min(n, max(3, 1 + round(detailLevel * (n - 1))));
-    if nKeep >= n
-        pos = 1:n;
-        return;
-    end
-
-    target = linspace(1, n + 1, nKeep + 1);
-    pos = unique(min(n, max(1, round(target(1:end-1)))), 'stable');
-    if numel(pos) < 3
-        pos = unique([1, round(n / 3), round(2 * n / 3)], 'stable');
-    end
-end
-
-function segPath = segment_from_cycle(cycleNodes, posA, posB)
-    n = numel(cycleNodes);
-    idx = posA:posB;
-    idx = mod(idx - 1, n) + 1;
-    segPath = cycleNodes(idx);
-end
-
-function pos = evenly_spaced_internal_positions(nNodesInPath, nExtra)
-    if nExtra <= 0
-        pos = zeros(1, 0);
-        return;
-    end
-
-    internal = 2:(nNodesInPath - 1);
-    target = linspace(2, nNodesInPath - 1, nExtra);
-    pos = unique(round(target), 'stable');
-    pos = intersect(internal, pos, 'stable');
-
-    k = 1;
-    while numel(pos) < nExtra && k <= numel(internal)
-        if ~ismember(internal(k), pos)
-            pos(end + 1) = internal(k); %#ok<AGROW>
-        end
-        k = k + 1;
-    end
-
-    pos = sort(pos);
-end
-
-function pos = ensure_anchor_positions(pos, nPath)
-    pos = unique(pos(:).', 'stable');
-    pos = pos(pos >= 1 & pos <= nPath);
-    pos = unique([1, pos, nPath], 'stable');
-end
-
-function out = classify_skeleton_node(skelIdx, deg)
-    if deg == 0
-        out = "island";
-    elseif deg == 1
-        out = "endpoint";
-    elseif deg > 2
-        out = "junction";
-    else
-        out = "waypoint";
-    end
-end
-
-function out = promote_role(oldRole, newRole)
-    order = ["waypoint", "island", "endpoint", "junction"];
-    oldPos = find(order == string(oldRole), 1);
-    newPos = find(order == string(newRole), 1);
-    if isempty(oldPos)
-        oldPos = 1;
-    end
-    if isempty(newPos)
-        newPos = 1;
-    end
-    out = order(max(oldPos, newPos));
-end
-
-function graphOut = build_struct_graph_from_segments(skelGraph, detailLevel, edgePairs, edgeLengths, edgePolyline, edgeFullPath, edgeComp, reducedRole, nNodes)
-    graphOut = struct();
-    graphOut.kind = 'structural_graph';
-    graphOut.parent_kind = 'skeleton_graph';
-    graphOut.detail_level = detailLevel;
-    graphOut.skeleton_num_nodes = skelGraph.num_nodes;
-    graphOut.edge_polyline = edgePolyline;
-    graphOut.edge_full_node_paths = edgeFullPath;
-    graphOut.edge_component_id = edgeComp;
-    graphOut.edge_length = edgeLengths;
-    graphOut.edges_local = edgePairs;
-    graphOut.edge_index = edgePairs.';
-    graphOut.node_role = reducedRole;
-
-    if isempty(edgePairs)
-        graphOut.graph = graph([], [], [], nNodes);
-    else
-        graphOut.graph = graph(edgePairs(:, 1), edgePairs(:, 2), edgeLengths, nNodes);
-    end
-end
-
-function [graphOut, cleanupDebug] = cleanup_structural_graph(graphIn, skelGraph)
-    graphOut = ensure_identity_cleanup_metadata(graphIn);
-    cleanupDebug = struct( ...
-        'applied', false, ...
-        'grid_spacing', NaN, ...
-        'min_edge_length', NaN, ...
-        'merge_radius', NaN, ...
-        'max_iterations', 0, ...
-        'iterations_used', 0, ...
-        'short_edge_contractions', 0, ...
-        'cluster_merges', 0, ...
-        'removed_node_coords', zeros(0, size(graphIn.node_coords, 2)), ...
-        'removed_original_node_indices', zeros(0, 1), ...
-        'before_num_nodes', graphIn.num_nodes, ...
-        'after_num_nodes', graphIn.num_nodes, ...
-        'before_num_edges', size(graphIn.edges_local, 1), ...
-        'after_num_edges', size(graphIn.edges_local, 1));
-
-    if graphIn.num_nodes < 2
-        graphOut.cleanup_info = default_cleanup_info(NaN, NaN, NaN, 0, 0, 0);
-        return;
-    end
-
-    h = estimate_characteristic_spacing(skelGraph.node_coords, skelGraph.edges_local);
+    h = estimate_characteristic_spacing(g.node_coords);
     if ~isfinite(h) || h <= 0
-        graphOut.cleanup_info = default_cleanup_info(NaN, NaN, NaN, 0, 0, 0);
         return;
     end
 
     minEdgeLength = 1.5 * h;
-    mergeRadius = 1.5 * h;
+    mergeRadius   = 1.5 * h;
     maxIterations = 4;
+    info.grid_spacing = h;
+    info.min_edge_length = minEdgeLength;
+    info.merge_radius = mergeRadius;
 
-    state = init_cleanup_state(graphIn);
-    totalShortEdgeContractions = 0;
-    totalClusterMerges = 0;
-    removedCoords = zeros(0, size(state.coords, 2));
-    removedOriginalIds = zeros(0, 1);
-    iterationsUsed = 0;
-
+    nShort = 0;
+    nClust = 0;
+    iterUsed = 0;
     for iter = 1:maxIterations
+        iterUsed = iter;
         changed = false;
-        iterationsUsed = iter;
 
-        needRebuild = true;
         while true
-            if needRebuild
-                [G_cur, deg_cur] = build_state_graph(state);
-                needRebuild = false;
-            end
-            [edgeIdx, nodeGroup] = find_short_edge_contraction_candidate(state, minEdgeLength, G_cur, deg_cur);
-            if edgeIdx == 0
+            pair = find_short_edge_pair(g, minEdgeLength);
+            if isempty(pair)
                 break;
             end
-            [state, mergeInfo] = merge_node_group(state, nodeGroup);
-            if isempty(mergeInfo.removed_indices)
-                break;
-            end
-            removedCoords = [removedCoords; mergeInfo.removed_coords]; %#ok<AGROW>
-            removedOriginalIds = [removedOriginalIds; mergeInfo.removed_original_indices(:)]; %#ok<AGROW>
-            totalShortEdgeContractions = totalShortEdgeContractions + 1;
-            needRebuild = true;
+            g = merge_pair(g, pair);
+            nShort = nShort + 1;
             changed = true;
         end
 
-        needRebuild = true;
         while true
-            if needRebuild
-                [G_cur, deg_cur, comp_cur] = build_state_graph(state);
-                needRebuild = false;
-            end
-            nodePair = find_junction_cluster_pair(state, mergeRadius, G_cur, deg_cur, comp_cur);
-            if isempty(nodePair)
+            pair = find_junction_cluster_pair(g, mergeRadius);
+            if isempty(pair)
                 break;
             end
-            [state, mergeInfo] = merge_node_group(state, nodePair);
-            if isempty(mergeInfo.removed_indices)
-                break;
-            end
-            removedCoords = [removedCoords; mergeInfo.removed_coords]; %#ok<AGROW>
-            removedOriginalIds = [removedOriginalIds; mergeInfo.removed_original_indices(:)]; %#ok<AGROW>
-            totalClusterMerges = totalClusterMerges + 1;
-            needRebuild = true;
+            g = merge_pair(g, pair);
+            nClust = nClust + 1;
             changed = true;
         end
 
@@ -1279,197 +765,87 @@ function [graphOut, cleanupDebug] = cleanup_structural_graph(graphIn, skelGraph)
         end
     end
 
-    if totalShortEdgeContractions == 0 && totalClusterMerges == 0
-        cleanupDebug.grid_spacing = h;
-        cleanupDebug.min_edge_length = minEdgeLength;
-        cleanupDebug.merge_radius = mergeRadius;
-        cleanupDebug.max_iterations = maxIterations;
-        cleanupDebug.iterations_used = iterationsUsed;
-        graphOut.cleanup_info = default_cleanup_info(h, minEdgeLength, mergeRadius, maxIterations, iterationsUsed, 0, 0);
-        return;
-    end
-
-    graphOut = finalize_cleanup_state(graphIn, state, h, minEdgeLength, mergeRadius, maxIterations, iterationsUsed, ...
-        totalShortEdgeContractions, totalClusterMerges);
-
-    cleanupDebug.applied = true;
-    cleanupDebug.grid_spacing = h;
-    cleanupDebug.min_edge_length = minEdgeLength;
-    cleanupDebug.merge_radius = mergeRadius;
-    cleanupDebug.max_iterations = maxIterations;
-    cleanupDebug.iterations_used = iterationsUsed;
-    cleanupDebug.short_edge_contractions = totalShortEdgeContractions;
-    cleanupDebug.cluster_merges = totalClusterMerges;
-    cleanupDebug.removed_node_coords = removedCoords;
-    cleanupDebug.removed_original_node_indices = unique(removedOriginalIds(:), 'stable');
-    cleanupDebug.before_num_nodes = graphIn.num_nodes;
-    cleanupDebug.after_num_nodes = graphOut.num_nodes;
-    cleanupDebug.before_num_edges = size(graphIn.edges_local, 1);
-    cleanupDebug.after_num_edges = size(graphOut.edges_local, 1);
+    info.iterations_used = iterUsed;
+    info.short_edge_contractions = nShort;
+    info.cluster_merges = nClust;
 end
 
-function graphOut = ensure_identity_cleanup_metadata(graphIn)
-    graphOut = graphIn;
-    n = graphIn.num_nodes;
-    if ~isfield(graphOut, 'merged_full_node_indices') || numel(graphOut.merged_full_node_indices) ~= n
-        if isfield(graphOut, 'full_node_indices') && numel(graphOut.full_node_indices) == n
-            graphOut.merged_full_node_indices = arrayfun(@(idx) graphOut.full_node_indices(idx), transpose(1:n), 'UniformOutput', false);
-        else
-            graphOut.merged_full_node_indices = arrayfun(@(idx) graphOut.node_labels(idx), transpose(1:n), 'UniformOutput', false);
-        end
-    end
-    if ~isfield(graphOut, 'merged_skeleton_node_indices') || numel(graphOut.merged_skeleton_node_indices) ~= n
-        if isfield(graphOut, 'reduced_node_to_skeleton_indices') && numel(graphOut.reduced_node_to_skeleton_indices) == n
-            graphOut.merged_skeleton_node_indices = arrayfun(@(idx) graphOut.reduced_node_to_skeleton_indices(idx), transpose(1:n), 'UniformOutput', false);
-        else
-            graphOut.merged_skeleton_node_indices = arrayfun(@(idx) idx, transpose(1:n), 'UniformOutput', false);
-        end
-    end
-    if ~isfield(graphOut, 'merged_structural_node_indices') || numel(graphOut.merged_structural_node_indices) ~= n
-        graphOut.merged_structural_node_indices = arrayfun(@(idx) idx, transpose(1:n), 'UniformOutput', false);
-    end
-end
-
-function info = default_cleanup_info(gridSpacing, minEdgeLength, mergeRadius, maxIterations, iterationsUsed, shortEdgeContractions, clusterMerges)
-    if nargin < 6
-        shortEdgeContractions = 0;
-    end
-    if nargin < 7
-        clusterMerges = 0;
-    end
-    info = struct( ...
-        'grid_spacing', gridSpacing, ...
-        'min_edge_length', minEdgeLength, ...
-        'merge_radius', mergeRadius, ...
-        'max_iterations', maxIterations, ...
-        'iterations_used', iterationsUsed, ...
-        'short_edge_contractions', shortEdgeContractions, ...
-        'cluster_merges', clusterMerges);
-end
-
-function state = init_cleanup_state(graphIn)
-    n = graphIn.num_nodes;
-    state = struct();
-    state.coords = graphIn.node_coords;
-    state.labels = graphIn.node_labels(:);
-    if isfield(graphIn, 'full_node_indices') && numel(graphIn.full_node_indices) == n
-        state.full_idx = graphIn.full_node_indices(:);
-    else
-        state.full_idx = graphIn.node_labels(:);
-    end
-    if isfield(graphIn, 'reduced_node_to_skeleton_indices') && numel(graphIn.reduced_node_to_skeleton_indices) == n
-        state.skel_idx = graphIn.reduced_node_to_skeleton_indices(:);
-    else
-        state.skel_idx = transpose(1:n);
-    end
-    if isfield(graphIn, 'node_role') && numel(graphIn.node_role) == n
-        state.node_role = string(graphIn.node_role(:));
-    else
-        state.node_role = repmat("waypoint", n, 1);
-    end
-    if isfield(graphIn, 'node_radius') && numel(graphIn.node_radius) == n
-        state.node_radius = graphIn.node_radius(:);
-    else
-        state.node_radius = nan(n, 1);
-    end
-    if isfield(graphIn, 'node_thickness') && numel(graphIn.node_thickness) == n
-        state.node_thickness = graphIn.node_thickness(:);
-    else
-        state.node_thickness = nan(n, 1);
-    end
-    if isfield(graphIn, 'node_data_table') && istable(graphIn.node_data_table) ...
-            && height(graphIn.node_data_table) == n
-        state.node_table = graphIn.node_data_table;
-    else
-        state.node_table = table();
-    end
-
-    state.original_struct_idx = arrayfun(@(idx) idx, transpose(1:n), 'UniformOutput', false);
-    state.member_full = arrayfun(@(idx) state.full_idx(idx), transpose(1:n), 'UniformOutput', false);
-    state.member_skel = arrayfun(@(idx) state.skel_idx(idx), transpose(1:n), 'UniformOutput', false);
-
-    state.edges = graphIn.edges_local;
-    nEdge = size(state.edges, 1);
-    if isfield(graphIn, 'edge_polyline') && numel(graphIn.edge_polyline) == nEdge
-        state.edge_polyline = graphIn.edge_polyline(:);
-    else
-        state.edge_polyline = arrayfun(@(i) state.coords(state.edges(i, :), :), transpose(1:nEdge), 'UniformOutput', false);
-    end
-    if isfield(graphIn, 'edge_full_node_paths') && numel(graphIn.edge_full_node_paths) == nEdge
-        state.edge_full_path = graphIn.edge_full_node_paths(:);
-    else
-        state.edge_full_path = arrayfun(@(i) state.full_idx(state.edges(i, :)).', transpose(1:nEdge), 'UniformOutput', false);
-    end
-    if isfield(graphIn, 'edge_length') && numel(graphIn.edge_length) == nEdge
-        state.edge_length = graphIn.edge_length(:);
-    else
-        state.edge_length = edge_lengths_from_state(state);
-    end
-end
-
-function h = estimate_characteristic_spacing(coords, edges)
+function h = estimate_characteristic_spacing(coords)
     xy = coords(:, 1:2);
     [xVals, ~] = cluster_axis_values(xy(:, 1));
     [yVals, ~] = cluster_axis_values(xy(:, 2));
     diffs = [diff(sort(xVals(:))); diff(sort(yVals(:)))];
     diffs = diffs(diffs > 0);
-    if ~isempty(diffs)
+    if isempty(diffs)
+        h = NaN;
+    else
         h = median(diffs);
-        return;
     end
-
-    if nargin >= 2 && ~isempty(edges)
-        delta = xy(edges(:, 1), :) - xy(edges(:, 2), :);
-        edgeLen = sqrt(sum(delta .^ 2, 2));
-        edgeLen = edgeLen(edgeLen > 0);
-        if ~isempty(edgeLen)
-            h = median(edgeLen);
-            return;
-        end
-    end
-
-    h = NaN;
 end
 
-function [edgeIdx, nodeGroup] = find_short_edge_contraction_candidate(state, minEdgeLength, G, deg)
-    edgeIdx = 0;
-    nodeGroup = zeros(1, 0);
-    if isempty(state.edges)
+function pair = find_short_edge_pair(g, minEdgeLength)
+    pair = [];
+    if isempty(g.edges_local)
         return;
     end
-
-    [~, order] = sort(state.edge_length(:), 'ascend');
-
+    [G, deg] = build_simple_graph(g);
+    [~, order] = sort(g.edge_length(:), 'ascend');
     for k = 1:numel(order)
         idx = order(k);
-        if state.edge_length(idx) >= minEdgeLength
-            break;
+        if g.edge_length(idx) >= minEdgeLength
+            return;
         end
-        u = state.edges(idx, 1);
-        v = state.edges(idx, 2);
+        u = g.edges_local(idx, 1);
+        v = g.edges_local(idx, 2);
         if u == v || deg(u) == 1 || deg(v) == 1
             continue;
         end
-        if deg(u) ~= 2 || deg(v) ~= 2 || nodes_share_common_neighbor(G, u, v)
-            edgeIdx = idx;
-            nodeGroup = [u, v];
+        if deg(u) ~= 2 || deg(v) ~= 2 || share_common_neighbour(G, u, v)
+            pair = [u, v];
             return;
         end
     end
 end
 
-function [G, deg, compId] = build_state_graph(state)
-    n = size(state.coords, 1);
-    if isempty(state.edges)
-        G = graph([], [], [], n);
-    else
-        G = graph(state.edges(:, 1), state.edges(:, 2), [], n);
+function pair = find_junction_cluster_pair(g, mergeRadius)
+    pair = [];
+    if g.num_nodes < 2 || isempty(g.edges_local)
+        return;
     end
-    deg = degree(G);
+    [G, deg] = build_simple_graph(g);
     compId = conncomp(G);
+    cands = find(deg > 2);
+    if numel(cands) < 2
+        return;
+    end
+    xy = g.node_coords(:, 1:2);
+    bestD = inf;
+    for i = 1:(numel(cands) - 1)
+        u = cands(i);
+        for j = (i + 1):numel(cands)
+            v = cands(j);
+            if compId(u) ~= compId(v)
+                continue;
+            end
+            d = norm(xy(u, :) - xy(v, :));
+            if d <= mergeRadius && d < bestD
+                bestD = d;
+                pair = [u, v];
+            end
+        end
+    end
 end
 
-function tf = nodes_share_common_neighbor(G, u, v)
+function [G, deg] = build_simple_graph(g)
+    if isempty(g.edges_local)
+        G = graph([], [], [], g.num_nodes);
+    else
+        G = graph(g.edges_local(:, 1), g.edges_local(:, 2), [], g.num_nodes);
+    end
+    deg = degree(G);
+end
+
+function tf = share_common_neighbour(G, u, v)
     nbrU = neighbors(G, u);
     nbrV = neighbors(G, v);
     nbrU(nbrU == v) = [];
@@ -1477,336 +853,151 @@ function tf = nodes_share_common_neighbor(G, u, v)
     tf = ~isempty(intersect(nbrU, nbrV));
 end
 
-function nodePair = find_junction_cluster_pair(state, mergeRadius, G, deg, compId)
-    nodePair = zeros(1, 0);
-    n = size(state.coords, 1);
-    if n < 2
+function g = merge_pair(g, pair)
+    pair = unique(pair(:).', 'stable');
+    pair = pair(pair >= 1 & pair <= g.num_nodes);
+    if numel(pair) < 2
         return;
     end
-    if isempty(state.edges)
-        return;
-    end
-
-    candidates = find(deg > 2);
-    if numel(candidates) < 2
-        return;
-    end
-
-    bestDist = inf;
-    bestPair = zeros(1, 2);
-    xy = state.coords(:, 1:2);
-    for i = 1:(numel(candidates) - 1)
-        u = candidates(i);
-        for j = (i + 1):numel(candidates)
-            v = candidates(j);
-            if compId(u) ~= compId(v)
-                continue;
-            end
-            d = norm(xy(u, :) - xy(v, :));
-            if d <= mergeRadius && d < bestDist
-                bestDist = d;
-                bestPair = [u, v];
-            end
-        end
-    end
-
-    if all(bestPair > 0)
-        nodePair = bestPair;
-    end
-end
-
-function [state, mergeInfo] = merge_node_group(state, nodeGroup)
-    nodeGroup = unique(nodeGroup(:), 'stable');
-    nodeGroup = nodeGroup(nodeGroup >= 1 & nodeGroup <= size(state.coords, 1));
-    mergeInfo = struct('representative_index', 0, 'removed_indices', zeros(0, 1), ...
-        'removed_original_indices', zeros(0, 1), 'removed_coords', zeros(0, size(state.coords, 2)));
-    if numel(nodeGroup) < 2
-        return;
-    end
-
-    G = graph(state.edges(:, 1), state.edges(:, 2), [], size(state.coords, 1));
-    deg = degree(G);
-    rep = choose_representative_node(state, nodeGroup, deg);
-    removeNodes = setdiff(nodeGroup, rep, 'stable');
+    [~, deg] = build_simple_graph(g);
+    rep = choose_representative(g, pair, deg);
+    removeNodes = setdiff(pair, rep, 'stable');
     if isempty(removeNodes)
         return;
     end
 
-    state.member_full{rep} = combine_unique_numeric_vectors( ...
-        state.member_full{rep}, concatenate_numeric_cells(state.member_full(removeNodes)));
-    state.member_skel{rep} = combine_unique_numeric_vectors( ...
-        state.member_skel{rep}, concatenate_numeric_cells(state.member_skel(removeNodes)));
-    state.original_struct_idx{rep} = combine_unique_numeric_vectors( ...
-        state.original_struct_idx{rep}, concatenate_numeric_cells(state.original_struct_idx(removeNodes)));
-
-    for e = 1:size(state.edges, 1)
-        src = state.edges(e, 1);
-        dst = state.edges(e, 2);
-        poly = state.edge_polyline{e};
-
+    nE = size(g.edges_local, 1);
+    for e = 1:nE
+        src = g.edges_local(e, 1);
+        dst = g.edges_local(e, 2);
+        poly = g.edge_polyline{e};
         if ismember(src, removeNodes)
-            state.edges(e, 1) = rep;
+            g.edges_local(e, 1) = rep;
             if ~isempty(poly)
-                poly(1, :) = state.coords(rep, :);
+                poly(1, :) = g.node_coords(rep, :);
             end
         end
         if ismember(dst, removeNodes)
-            state.edges(e, 2) = rep;
+            g.edges_local(e, 2) = rep;
             if ~isempty(poly)
-                poly(end, :) = state.coords(rep, :);
+                poly(end, :) = g.node_coords(rep, :);
             end
         end
-        state.edge_polyline{e} = poly;
+        g.edge_polyline{e} = poly;
     end
 
-    removeMask = false(size(state.coords, 1), 1);
+    removeMask = false(g.num_nodes, 1);
     removeMask(removeNodes) = true;
-
-    mergeInfo.representative_index = rep;
-    mergeInfo.removed_indices = removeNodes(:);
-    mergeInfo.removed_original_indices = concatenate_numeric_cells(state.original_struct_idx(removeNodes));
-    mergeInfo.removed_coords = state.coords(removeNodes, :);
-
-    state = compact_cleanup_state(state, removeMask);
+    g = compact_structural(g, removeMask);
 end
 
-function rep = choose_representative_node(state, nodeGroup, deg)
-    degVals = deg(nodeGroup);
-    bestDegree = max(degVals);
-    candidates = nodeGroup(degVals == bestDegree);
-
-    thicknessVals = node_thickness_proxy(state);
-    if ~isempty(thicknessVals)
-        thick = thicknessVals(candidates);
+function rep = choose_representative(g, pair, deg)
+    degVals = deg(pair);
+    cands = pair(degVals == max(degVals));
+    if numel(cands) > 1
+        thick = g.node_thickness(cands);
         thick(~isfinite(thick)) = -inf;
-        bestThickness = max(thick);
-        candidates = candidates(thick == bestThickness);
+        cands = cands(thick == max(thick));
     end
-
-    if numel(candidates) == 1
-        rep = candidates(1);
+    if numel(cands) == 1
+        rep = cands(1);
         return;
     end
-
-    xy = state.coords(candidates, 1:2);
-    totalDist = zeros(numel(candidates), 1);
-    for i = 1:numel(candidates)
+    xy = g.node_coords(cands, 1:2);
+    totalDist = zeros(numel(cands), 1);
+    for i = 1:numel(cands)
         delta = xy - xy(i, :);
         totalDist(i) = sum(sqrt(sum(delta .^ 2, 2)));
     end
-    [~, bestIdx] = min(totalDist);
-    rep = candidates(bestIdx);
+    [~, bestRel] = min(totalDist);
+    rep = cands(bestRel);
 end
 
-function vals = node_thickness_proxy(state)
-    vals = [];
-    if isfield(state, 'node_thickness') && numel(state.node_thickness) == size(state.coords, 1)
-        vals = double(state.node_thickness(:));
-        return;
-    end
-    if ~istable(state.node_table) || isempty(state.node_table)
-        return;
-    end
-
-    preferred = {'Thickness', 'LocalThickness', 'BoundaryStepDistance', ...
-        'Attr_Thickness', 'Attr_LocalThickness', 'Attr_BoundaryStepDistance'};
-    varNames = state.node_table.Properties.VariableNames;
-    for i = 1:numel(preferred)
-        if any(strcmp(varNames, preferred{i}))
-            col = state.node_table.(preferred{i});
-            if isnumeric(col) && numel(col) == size(state.coords, 1)
-                vals = double(col(:));
-                return;
-            end
-        end
-    end
-end
-
-function out = concatenate_numeric_cells(cellVals)
-    out = zeros(0, 1);
-    for i = 1:numel(cellVals)
-        vals = cellVals{i};
-        if isempty(vals)
-            continue;
-        end
-        out = [out; vals(:)]; %#ok<AGROW>
-    end
-    out = unique(out, 'stable');
-end
-
-function out = combine_unique_numeric_vectors(a, b)
-    out = unique([a(:); b(:)], 'stable');
-end
-
-function state = compact_cleanup_state(state, removeMask)
+function g = compact_structural(g, removeMask)
     keepMask = ~removeMask(:);
     oldToNew = zeros(numel(keepMask), 1);
     oldToNew(keepMask) = 1:nnz(keepMask);
 
-    state.coords = state.coords(keepMask, :);
-    state.labels = state.labels(keepMask);
-    state.full_idx = state.full_idx(keepMask);
-    state.skel_idx = state.skel_idx(keepMask);
-    state.node_role = state.node_role(keepMask);
-    state.node_radius = state.node_radius(keepMask);
-    state.node_thickness = state.node_thickness(keepMask);
-    state.member_full = state.member_full(keepMask);
-    state.member_skel = state.member_skel(keepMask);
-    state.original_struct_idx = state.original_struct_idx(keepMask);
-    if istable(state.node_table) && height(state.node_table) == numel(keepMask)
-        state.node_table = state.node_table(keepMask, :);
-    end
+    g.node_coords    = g.node_coords(keepMask, :);
+    g.node_labels    = g.node_labels(keepMask);
+    g.num_nodes      = nnz(keepMask);
+    g.full_node_indices = g.full_node_indices(keepMask);
+    g.reduced_node_to_full_indices = g.full_node_indices;
+    g.node_radius    = g.node_radius(keepMask);
+    g.node_thickness = g.node_thickness(keepMask);
+    g.node_data_table = g.node_data_table(keepMask, :);
 
-    if isempty(state.edges)
+    if isempty(g.edges_local)
+        g.edge_index = zeros(2, 0);
         return;
     end
+    g.edges_local      = oldToNew(g.edges_local);
+    valid              = all(g.edges_local > 0, 2);
+    g.edges_local      = g.edges_local(valid, :);
+    g.edge_polyline    = g.edge_polyline(valid);
+    g.edge_full_node_paths = g.edge_full_node_paths(valid);
+    g.edge_length      = g.edge_length(valid);
 
-    state.edges = oldToNew(state.edges);
-    valid = all(state.edges > 0, 2);
-    state.edges = state.edges(valid, :);
-    state.edge_polyline = state.edge_polyline(valid);
-    state.edge_full_path = state.edge_full_path(valid);
-    state.edge_length = state.edge_length(valid);
+    nonSelf = g.edges_local(:, 1) ~= g.edges_local(:, 2);
+    g.edges_local      = g.edges_local(nonSelf, :);
+    g.edge_polyline    = g.edge_polyline(nonSelf);
+    g.edge_full_node_paths = g.edge_full_node_paths(nonSelf);
+    g.edge_length      = g.edge_length(nonSelf);
 
-    nonSelf = state.edges(:, 1) ~= state.edges(:, 2);
-    state.edges = state.edges(nonSelf, :);
-    state.edge_polyline = state.edge_polyline(nonSelf);
-    state.edge_full_path = state.edge_full_path(nonSelf);
-    state.edge_length = state.edge_length(nonSelf);
-
-    state = deduplicate_cleanup_edges(state);
+    g = recompute_edge_lengths(g);
+    g = deduplicate_edges(g);
+    g.edge_index = g.edges_local.';
 end
 
-function state = deduplicate_cleanup_edges(state)
-    if isempty(state.edges)
+function g = recompute_edge_lengths(g)
+    nE = size(g.edges_local, 1);
+    for i = 1:nE
+        poly = g.edge_polyline{i};
+        if ~isempty(poly) && size(poly, 1) >= 2
+            g.edge_length(i, 1) = path_length(poly);
+        else
+            d = g.node_coords(g.edges_local(i, 1), :) - g.node_coords(g.edges_local(i, 2), :);
+            g.edge_length(i, 1) = norm(d);
+        end
+    end
+end
+
+function g = deduplicate_edges(g)
+    if isempty(g.edges_local)
         return;
     end
-
-    for i = 1:size(state.edges, 1)
-        state.edge_length(i, 1) = resolve_edge_length(state, i);
-    end
-
-    sortedPairs = sort(state.edges, 2);
+    sortedPairs = sort(g.edges_local, 2);
     [~, ~, groupId] = unique(sortedPairs, 'rows', 'stable');
-    keepIdx = zeros(max(groupId), 1);
-    for g = 1:max(groupId)
-        members = find(groupId == g);
+    keep = zeros(max(groupId), 1);
+    for grp = 1:max(groupId)
+        members = find(groupId == grp);
         if numel(members) == 1
-            keepIdx(g) = members;
-            continue;
-        end
-        [~, bestRel] = max(state.edge_length(members));
-        keepIdx(g) = members(bestRel(1));
-    end
-    keepIdx = keepIdx(keepIdx > 0);
-    keepIdx = sort(keepIdx);
-
-    state.edges = state.edges(keepIdx, :);
-    state.edge_polyline = state.edge_polyline(keepIdx);
-    state.edge_full_path = state.edge_full_path(keepIdx);
-    state.edge_length = state.edge_length(keepIdx);
-end
-
-function len = resolve_edge_length(state, edgeIdx)
-    poly = state.edge_polyline{edgeIdx};
-    if ~isempty(poly) && size(poly, 1) >= 2
-        len = path_length(poly);
-        return;
-    end
-    edge = state.edges(edgeIdx, :);
-    len = norm(state.coords(edge(1), :) - state.coords(edge(2), :));
-end
-
-function lengths = edge_lengths_from_state(state)
-    lengths = zeros(size(state.edges, 1), 1);
-    for i = 1:size(state.edges, 1)
-        lengths(i, 1) = resolve_edge_length(state, i);
-    end
-end
-
-function graphOut = finalize_cleanup_state(graphIn, state, h, minEdgeLength, mergeRadius, maxIterations, iterationsUsed, shortEdgeContractions, clusterMerges)
-    graphOut = graphIn;
-    n = size(state.coords, 1);
-    graphOut.node_coords = state.coords;
-    graphOut.node_labels = state.labels;
-    graphOut.num_nodes = n;
-    graphOut.full_node_indices = state.full_idx;
-    graphOut.full_node_labels = state.labels;
-    graphOut.reduced_node_to_full_indices = state.full_idx;
-    graphOut.reduced_node_to_skeleton_indices = state.skel_idx;
-    graphOut.boundary_mask = false(n, 1);
-    graphOut.node_radius = state.node_radius;
-    graphOut.node_thickness = state.node_thickness;
-    graphOut.merged_full_node_indices = state.member_full;
-    graphOut.merged_skeleton_node_indices = state.member_skel;
-    graphOut.merged_structural_node_indices = state.original_struct_idx;
-
-    graphOut.edges_local = state.edges;
-    graphOut.edge_index = state.edges.';
-    graphOut.edge_polyline = state.edge_polyline;
-    graphOut.edge_full_node_paths = state.edge_full_path;
-    graphOut.edge_length = edge_lengths_from_state(state);
-
-    if isempty(state.edges)
-        G = graph([], [], [], n);
-        edgeComp = zeros(0, 1);
-        deg = zeros(n, 1);
-    else
-        G = graph(state.edges(:, 1), state.edges(:, 2), graphOut.edge_length, n);
-        compId = conncomp(G);
-        edgeComp = compId(state.edges(:, 1)).';
-        edgeComp = edgeComp(:);
-        deg = degree(G);
-    end
-
-    graphOut.graph = G;
-    graphOut.edge_component_id = edgeComp;
-    roleCell = arrayfun(@(d) classify_skeleton_node(1, d), deg, 'UniformOutput', false);
-    graphOut.node_role = reshape(string(roleCell), [], 1);
-
-    nodeTable = state.node_table;
-    if ~istable(nodeTable) || height(nodeTable) ~= n
-        nodeTable = table();
-    else
-        if any(strcmp(nodeTable.Properties.VariableNames, 'Label'))
-            nodeTable.Label = state.labels;
+            keep(grp) = members;
+        else
+            [~, bestRel] = max(g.edge_length(members));
+            keep(grp) = members(bestRel(1));
         end
     end
-
-    nodeTable = upsert_table_column(nodeTable, 'FullNodeIndex', state.full_idx);
-    nodeTable = upsert_table_column(nodeTable, 'SkeletonNodeIndex', state.skel_idx);
-    nodeTable = upsert_table_column(nodeTable, 'Radius', state.node_radius);
-    nodeTable = upsert_table_column(nodeTable, 'Thickness', state.node_thickness);
-    nodeTable = upsert_table_column(nodeTable, 'NodeRole', graphOut.node_role);
-    nodeTable = upsert_table_column(nodeTable, 'MergedFullNodeIndices', reshape(string(cellfun(@join_numeric_path_local, state.member_full, 'UniformOutput', false)), [], 1));
-    nodeTable = upsert_table_column(nodeTable, 'MergedSkeletonNodeIndices', reshape(string(cellfun(@join_numeric_path_local, state.member_skel, 'UniformOutput', false)), [], 1));
-    nodeTable = upsert_table_column(nodeTable, 'MergedStructuralNodeIndices', reshape(string(cellfun(@join_numeric_path_local, state.original_struct_idx, 'UniformOutput', false)), [], 1));
-    graphOut.node_data_table = nodeTable;
-
-    graphOut.cleanup_info = default_cleanup_info(h, minEdgeLength, mergeRadius, maxIterations, iterationsUsed, shortEdgeContractions, clusterMerges);
+    keep = sort(keep(keep > 0));
+    g.edges_local      = g.edges_local(keep, :);
+    g.edge_polyline    = g.edge_polyline(keep);
+    g.edge_full_node_paths = g.edge_full_node_paths(keep);
+    g.edge_length      = g.edge_length(keep);
 end
 
-function graphOut = attach_structural_edge_thickness(graphIn, fullGraph)
-    graphOut = graphIn;
-    nEdge = size(graphIn.edges_local, 1);
-    if nEdge == 0 || ~isfield(graphIn, 'edge_full_node_paths') || numel(graphIn.edge_full_node_paths) ~= nEdge ...
-            || ~isfield(fullGraph, 'node_thickness') || isempty(fullGraph.node_thickness)
-        graphOut.edge_thickness_min = zeros(0, 1);
-        graphOut.edge_thickness_mean = zeros(0, 1);
-        graphOut.edge_thickness_max = zeros(0, 1);
-        graphOut.edge_thickness_bottleneck = zeros(0, 1);
-        graphOut.edge_thickness_delta = zeros(0, 1);
+% =========================================================================
+% Edge thickness summary (min only)
+% =========================================================================
+
+function g = attach_edge_thickness_min(g, fullThickness)
+    nE = size(g.edges_local, 1);
+    edgeMin = nan(nE, 1);
+    if nE == 0 || isempty(fullThickness)
+        g.edge_thickness_min = edgeMin;
         return;
     end
-
-    fullThickness = fullGraph.node_thickness(:);
-    edgeMin = nan(nEdge, 1);
-    edgeMean = nan(nEdge, 1);
-    edgeMax = nan(nEdge, 1);
-    edgeBottleneck = nan(nEdge, 1);
-    edgeDelta = nan(nEdge, 1);
-    for i = 1:nEdge
-        pathIdx = graphIn.edge_full_node_paths{i};
+    for i = 1:nE
+        pathIdx = g.edge_full_node_paths{i};
         if isempty(pathIdx)
             continue;
         end
@@ -1821,49 +1012,13 @@ function graphOut = attach_structural_edge_thickness(graphIn, fullGraph)
             continue;
         end
         edgeMin(i) = min(values);
-        edgeMean(i) = mean(values);
-        edgeMax(i) = max(values);
-        edgeBottleneck(i) = edgeMin(i);
-        edgeDelta(i) = edgeMax(i) - edgeMin(i);
     end
-
-    graphOut.edge_thickness_min = edgeMin;
-    graphOut.edge_thickness_mean = edgeMean;
-    graphOut.edge_thickness_max = edgeMax;
-    graphOut.edge_thickness_bottleneck = edgeBottleneck;
-    graphOut.edge_thickness_delta = edgeDelta;
+    g.edge_thickness_min = edgeMin;
 end
 
-function tbl = upsert_table_column(tbl, varName, values)
-    if ~istable(tbl)
-        tbl = table();
-    end
-    if isempty(tbl)
-        tbl = table(values, 'VariableNames', {varName});
-        return;
-    end
-    if any(strcmp(tbl.Properties.VariableNames, varName))
-        tbl.(varName) = values;
-    else
-        tbl.(varName) = values;
-    end
-end
-
-function out = join_numeric_path_local(pathVec)
-    if isempty(pathVec)
-        out = "";
-        return;
-    end
-    out = strjoin(string(pathVec(:).'), ' ');
-end
-
-function out = get_default(s, fieldName, fallback)
-    if isstruct(s) && isfield(s, fieldName)
-        out = s.(fieldName);
-    else
-        out = fallback;
-    end
-end
+% =========================================================================
+% Misc
+% =========================================================================
 
 function len = path_length(coords)
     if size(coords, 1) < 2
