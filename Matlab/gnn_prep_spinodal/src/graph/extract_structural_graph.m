@@ -6,15 +6,18 @@ function [structGraph, skeletonGraph, debugData, annotatedFullGraph] = extract_s
 % Name-Value options:
 %   'DetailLevel'       : [0,1], 0 = coarsest, 1 = keep full skeleton chains
 %   'MinIslandNodes'    : minimum skeleton-node count kept for an isolated component
+%   'SpurPruneRadiusFactor' : prune terminal branches shorter than this
+%                             multiple of junction radius (default 1.5)
 %
-% The dense graph is first rasterized onto its native XY node grid, thinned to a
-% one-node-thick skeleton with a standard Zhang-Suen topology-preserving thinning
-% procedure, and then compressed by collapsing degree-2 chains. Reduced edges keep
-% the full skeleton polyline and the originating dense-graph node ids.
+% The dense graph is first rasterized onto its native XY node grid, reduced to a
+% one-node-thick medial skeleton, and then compressed by collapsing degree-2
+% chains. Reduced edges keep the full skeleton polyline and the originating
+% dense-graph node ids.
 
     p = inputParser;
     p.addParameter('DetailLevel', 0.20, @(x) isnumeric(x) && isscalar(x) && x >= 0 && x <= 1);
     p.addParameter('MinIslandNodes', 1, @(x) isnumeric(x) && isscalar(x) && x >= 1);
+    p.addParameter('SpurPruneRadiusFactor', 1.5, @(x) isnumeric(x) && isscalar(x) && isfinite(x) && x >= 0);
     p.parse(varargin{:});
     opts = p.Results;
 
@@ -48,8 +51,7 @@ function [structGraph, skeletonGraph, debugData, annotatedFullGraph] = extract_s
         end
     end
     occMask = nodeAt > 0;
-    closedMask = imclose(occMask, strel('square', 3));
-    componentAt = periodic_components(closedMask);
+    componentAt = periodic_components(occMask);
 
     % Periodic boundary mask: occupied pixel is boundary iff any 4-connected
     % periodic neighbour is void. circshift wraps at domain edges without tiling.
@@ -64,9 +66,10 @@ function [structGraph, skeletonGraph, debugData, annotatedFullGraph] = extract_s
     [radiusMap, thicknessMap, spacingInfo] = compute_physical_radius_map(occMask, boundaryMask, xVals, yVals);
     annotatedFullGraph = attach_full_graph_thickness(fullGraph, xBin, yBin, radiusMap, thicknessMap);
 
-    % Skeletonize on closedMask so skeleton extends through 1-pixel gaps,
-    % then restrict to occMask so nodes only land on real FE positions.
-    fullSkel = skeletonize_component(closedMask) & occMask;
+    % Skeletonize the real occupied material only. Closing the mask before
+    % skeletonization can erase local medial branches and can create false
+    % topological bridges through one-cell void gaps.
+    fullSkel = skeletonize_component(occMask);
 
     skelMask = false(size(occMask));
     for compId = 1:max(componentAt(:))
@@ -88,7 +91,10 @@ function [structGraph, skeletonGraph, debugData, annotatedFullGraph] = extract_s
 
     [skeletonGraph, skelDebug] = build_skeleton_graph_from_mask( ...
         skelMask, componentAt, nodeAt, xy, annotatedFullGraph.node_labels(:), fullNodeData, boundaryStepDistance, parentKind, ...
-        annotatedFullGraph.node_radius(:), annotatedFullGraph.node_thickness(:), closedMask);
+        annotatedFullGraph.node_radius(:), annotatedFullGraph.node_thickness(:));
+    skeletonGraphBeforePrune = skeletonGraph;
+    [skeletonGraph, spurPruneDebug] = prune_radius_covered_skeleton_spurs(skeletonGraph, opts.SpurPruneRadiusFactor);
+    [skelMask, skelDebug.skelLocalAtGrid] = skeleton_mask_from_graph(skeletonGraph, size(occMask));
 
     structGraph = compress_skeleton_graph(skeletonGraph, opts.DetailLevel);
     structGraphBeforeCleanup = structGraph;
@@ -108,6 +114,8 @@ function [structGraph, skeletonGraph, debugData, annotatedFullGraph] = extract_s
     debugData.spacing_info = spacingInfo;
     debugData.skeleton_mask = skelMask;
     debugData.skeleton_local_at_grid = skelDebug.skelLocalAtGrid;
+    debugData.skeleton_before_spur_prune = skeletonGraphBeforePrune;
+    debugData.skeleton_spur_prune = spurPruneDebug;
     debugData.structural_before_cleanup = structGraphBeforeCleanup;
     debugData.structural_cleanup = cleanupDebug;
 end
@@ -139,9 +147,56 @@ function [valsOut, binIdx] = cluster_axis_values(vals)
         groupSorted(i) = g;
     end
 
-    valsOut = accumarray(groupSorted, sortedVals, [], @mean);
-    binIdx = zeros(n, 1);
-    binIdx(order) = groupSorted;
+    occupiedVals = accumarray(groupSorted, sortedVals, [], @mean);
+    occupiedBinIdx = zeros(n, 1);
+    occupiedBinIdx(order) = groupSorted;
+
+    [valsOut, occupiedToFull] = expand_regular_axis_values(occupiedVals, tol);
+    binIdx = occupiedToFull(occupiedBinIdx);
+end
+
+function [valsOut, occupiedToFull] = expand_regular_axis_values(occupiedVals, clusterTol)
+    occupiedVals = double(occupiedVals(:));
+    n = numel(occupiedVals);
+    occupiedToFull = transpose(1:n);
+    valsOut = occupiedVals;
+    if n < 2
+        return;
+    end
+
+    diffs = diff(occupiedVals);
+    posDiffs = diffs(diffs > 0);
+    if isempty(posDiffs)
+        return;
+    end
+
+    baseStep = min(posDiffs);
+    if ~isfinite(baseStep) || baseStep <= 0
+        return;
+    end
+
+    relPos = (occupiedVals - occupiedVals(1)) ./ baseStep;
+    fullIdx = round(relPos) + 1;
+    axisTol = max([0.20 * baseStep, 10 * clusterTol, eps(max(abs(occupiedVals))) * 16]);
+    reconstructed = occupiedVals(1) + (fullIdx - 1) .* baseStep;
+    if any(fullIdx < 1) || any(abs(reconstructed - occupiedVals) > axisTol)
+        return;
+    end
+
+    nFull = fullIdx(end);
+    if nFull <= n
+        return;
+    end
+
+    % Guard against accidental expansion on nonuniform coordinates. The shell
+    % grids used here are regular, so real gaps should be integer multiples of
+    % the native spacing.
+    if nFull > max(4 * n, n + 256)
+        return;
+    end
+
+    valsOut = occupiedVals(1) + transpose(0:(nFull - 1)) .* baseStep;
+    occupiedToFull = fullIdx(:);
 end
 
 function perim = find_perimeter_pixels(mask)
@@ -272,9 +327,13 @@ function skel = skeletonize_component(mask)
         return;
     end
     try
-        skel = bwskel(mask);
-    catch
         skel = bwmorph(mask, 'skel', Inf);
+    catch
+        try
+            skel = bwskel(mask, 'MinBranchLength', 0);
+        catch
+            skel = bwskel(mask);
+        end
     end
     skel = logical(skel);
 end
@@ -372,10 +431,7 @@ function labels = connected_components_binary(mask, conn)
     end
 end
 
-function [skelGraph, debugData] = build_skeleton_graph_from_mask(skelMask, componentAt, nodeAt, xyFull, fullLabels, fullNodeData, distMap, parentKind, fullRadius, fullThickness, closedMask)
-    if nargin < 11 || isempty(closedMask)
-        closedMask = skelMask | false(size(skelMask));
-    end
+function [skelGraph, debugData] = build_skeleton_graph_from_mask(skelMask, componentAt, nodeAt, xyFull, fullLabels, fullNodeData, distMap, parentKind, fullRadius, fullThickness)
     skelLinear = find(skelMask);
     nSkel = numel(skelLinear);
     if nSkel == 0
@@ -390,9 +446,6 @@ function [skelGraph, debugData] = build_skeleton_graph_from_mask(skelMask, compo
     skelLocalAt(skelLinear) = 1:nSkel;
 
     dirs = [0 1; 1 -1; 1 0; 1 1];
-    % 2-step bridge directions (same 4 axes at stride 2) — used to bridge
-    % 1-pixel closed-only cells where the skeleton was restricted to occMask.
-    bridgeDirs = [0 2; 2 -2; 2 0; 2 2];
     edges = zeros(0, 2);
     lengths = zeros(0, 1);
     for i = 1:nSkel
@@ -420,33 +473,6 @@ function [skelGraph, debugData] = build_skeleton_graph_from_mask(skelMask, compo
             end
             j = skelLocalAt(rr, cc);
             if j == 0
-                continue;
-            end
-            edges(end + 1, :) = [i, j]; %#ok<AGROW>
-            lengths(end + 1, 1) = norm(coords(i, :) - coords(j, :)); %#ok<AGROW>
-        end
-
-        % --- 2-step bridges across closed-only gap cells ---
-        for d = 1:size(bridgeDirs, 1)
-            dr = bridgeDirs(d, 1);
-            dc = bridgeDirs(d, 2);
-            rr = r + dr;
-            cc = c + dc;
-            if rr < 1 || rr > size(skelMask, 1) || cc < 1 || cc > size(skelMask, 2)
-                continue;
-            end
-            j = skelLocalAt(rr, cc);
-            if j == 0
-                continue;
-            end
-            if componentAt(rr, cc) ~= thisComp
-                continue;
-            end
-            % Mid-cell must be a closed-only bridge pixel (in closedMask but
-            % not a skeleton pixel itself).
-            rm = r + dr / 2;
-            cm = c + dc / 2;
-            if ~closedMask(rm, cm) || skelLocalAt(rm, cm) ~= 0
                 continue;
             end
             edges(end + 1, :) = [i, j]; %#ok<AGROW>
@@ -507,6 +533,181 @@ function [skelGraph, debugData] = build_skeleton_graph_from_mask(skelMask, compo
 
     debugData = struct();
     debugData.skelLocalAtGrid = skelLocalAt;
+end
+
+function [graphOut, pruneDebug] = prune_radius_covered_skeleton_spurs(graphIn, radiusFactor)
+    graphOut = graphIn;
+    pruneDebug = struct( ...
+        'applied', false, ...
+        'radius_factor', radiusFactor, ...
+        'iterations_used', 0, ...
+        'pruned_branch_count', 0, ...
+        'pruned_node_count', 0, ...
+        'pruned_branch_lengths', zeros(0, 1), ...
+        'pruned_root_radii', zeros(0, 1), ...
+        'pruned_full_node_indices', zeros(0, 1));
+
+    if radiusFactor <= 0 || graphIn.num_nodes < 2 || isempty(graphIn.edges_local) ...
+            || ~isfield(graphIn, 'node_radius') || numel(graphIn.node_radius) ~= graphIn.num_nodes
+        return;
+    end
+
+    maxIterations = max(1, graphIn.num_nodes);
+    for iter = 1:maxIterations
+        G = graphOut.graph;
+        deg = degree(G);
+        endpoints = find(deg == 1);
+        removeMask = false(graphOut.num_nodes, 1);
+        branchLengths = zeros(0, 1);
+        rootRadii = zeros(0, 1);
+
+        for i = 1:numel(endpoints)
+            [path, root] = trace_terminal_skeleton_branch(G, deg, endpoints(i));
+            if isempty(path) || root < 1 || deg(root) <= 2
+                continue;
+            end
+
+            rootRadius = graphOut.node_radius(root);
+            if ~isfinite(rootRadius) || rootRadius <= 0
+                continue;
+            end
+
+            branchLength = path_length(graphOut.node_coords(path, 1:2));
+            if branchLength <= radiusFactor * rootRadius
+                removeMask(path(1:end - 1)) = true;
+                branchLengths(end + 1, 1) = branchLength; %#ok<AGROW>
+                rootRadii(end + 1, 1) = rootRadius; %#ok<AGROW>
+            end
+        end
+
+        if ~any(removeMask)
+            pruneDebug.iterations_used = iter - 1;
+            break;
+        end
+
+        removedFull = zeros(0, 1);
+        if isfield(graphOut, 'full_node_indices') && numel(graphOut.full_node_indices) == graphOut.num_nodes
+            removedFull = graphOut.full_node_indices(removeMask);
+        end
+
+        graphOut = remove_skeleton_nodes(graphOut, removeMask);
+        pruneDebug.applied = true;
+        pruneDebug.iterations_used = iter;
+        pruneDebug.pruned_branch_count = pruneDebug.pruned_branch_count + numel(branchLengths);
+        pruneDebug.pruned_node_count = pruneDebug.pruned_node_count + nnz(removeMask);
+        pruneDebug.pruned_branch_lengths = [pruneDebug.pruned_branch_lengths; branchLengths]; %#ok<AGROW>
+        pruneDebug.pruned_root_radii = [pruneDebug.pruned_root_radii; rootRadii]; %#ok<AGROW>
+        pruneDebug.pruned_full_node_indices = unique([pruneDebug.pruned_full_node_indices; removedFull(:)], 'stable');
+
+        if graphOut.num_nodes < 2 || isempty(graphOut.edges_local)
+            break;
+        end
+    end
+end
+
+function [path, root] = trace_terminal_skeleton_branch(G, deg, endpoint)
+    path = endpoint;
+    root = endpoint;
+    prev = 0;
+    curr = endpoint;
+    while true
+        nbrs = neighbors(G, curr);
+        nbrs(nbrs == prev) = [];
+        if isempty(nbrs)
+            root = curr;
+            return;
+        end
+        next = nbrs(1);
+        path(end + 1) = next; %#ok<AGROW>
+        prev = curr;
+        curr = next;
+        root = curr;
+        if deg(curr) ~= 2
+            return;
+        end
+    end
+end
+
+function graphOut = remove_skeleton_nodes(graphIn, removeMask)
+    graphOut = graphIn;
+    removeMask = logical(removeMask(:));
+    keepMask = ~removeMask;
+    oldToNew = zeros(numel(keepMask), 1);
+    oldToNew(keepMask) = 1:nnz(keepMask);
+
+    graphOut.node_coords = graphIn.node_coords(keepMask, :);
+    graphOut.node_labels = graphIn.node_labels(keepMask);
+    graphOut.num_nodes = nnz(keepMask);
+
+    optionalNodeFields = {'boundary_mask', 'full_node_indices', 'full_node_labels', ...
+        'grid_linear_index', 'boundary_step_distance', 'node_radius', 'node_thickness'};
+    for i = 1:numel(optionalNodeFields)
+        fieldName = optionalNodeFields{i};
+        if isfield(graphOut, fieldName) && numel(graphOut.(fieldName)) == numel(keepMask)
+            graphOut.(fieldName) = graphOut.(fieldName)(keepMask);
+        end
+    end
+
+    if isfield(graphOut, 'node_data_table') && istable(graphOut.node_data_table) ...
+            && height(graphOut.node_data_table) == numel(keepMask)
+        graphOut.node_data_table = graphOut.node_data_table(keepMask, :);
+    end
+
+    if isempty(graphIn.edges_local)
+        edges = zeros(0, 2);
+    else
+        edgeKeep = ~removeMask(graphIn.edges_local(:, 1)) & ~removeMask(graphIn.edges_local(:, 2));
+        edges = graphIn.edges_local(edgeKeep, :);
+        if ~isempty(edges)
+            edges = oldToNew(edges);
+            edges = edges(edges(:, 1) ~= edges(:, 2), :);
+        end
+    end
+
+    graphOut.edges_local = edges;
+    graphOut.edge_index = edges.';
+    graphOut.edge_length = skeleton_edge_lengths(graphOut.node_coords, edges);
+    if isempty(edges)
+        graphOut.graph = graph([], [], [], graphOut.num_nodes);
+    else
+        graphOut.graph = graph(edges(:, 1), edges(:, 2), graphOut.edge_length, graphOut.num_nodes);
+    end
+
+    deg = degree(graphOut.graph);
+    role = skeleton_roles_from_degree(deg);
+    if isfield(graphOut, 'node_data_table') && istable(graphOut.node_data_table) ...
+            && height(graphOut.node_data_table) == graphOut.num_nodes ...
+            && any(strcmp(graphOut.node_data_table.Properties.VariableNames, 'SkeletonRole'))
+        graphOut.node_data_table.SkeletonRole = role;
+    end
+end
+
+function lengths = skeleton_edge_lengths(coords, edges)
+    lengths = zeros(size(edges, 1), 1);
+    if isempty(edges)
+        return;
+    end
+    delta = coords(edges(:, 1), 1:2) - coords(edges(:, 2), 1:2);
+    lengths = sqrt(sum(delta .^ 2, 2));
+end
+
+function role = skeleton_roles_from_degree(deg)
+    role = repmat("waypoint", numel(deg), 1);
+    role(deg == 0) = "island";
+    role(deg == 1) = "endpoint";
+    role(deg == 2) = "chain";
+    role(deg > 2) = "junction";
+end
+
+function [mask, skelLocalAt] = skeleton_mask_from_graph(skeletonGraph, maskSize)
+    mask = false(maskSize);
+    skelLocalAt = zeros(maskSize);
+    if isfield(skeletonGraph, 'grid_linear_index') && numel(skeletonGraph.grid_linear_index) == skeletonGraph.num_nodes
+        gridIdx = skeletonGraph.grid_linear_index(:);
+        valid = gridIdx >= 1 & gridIdx <= prod(maskSize);
+        mask(gridIdx(valid)) = true;
+        skelLocalAt(gridIdx(valid)) = find(valid);
+    end
 end
 
 function tf = supports_diagonal_link(componentAt, r0, c0, r1, c1, compId)
