@@ -22,7 +22,7 @@ cfg.bandwidth    = 0.125;           % relative shell thickness around target |k|
 cfg.nModes       = 4000;        % number of Fourier modes to sample (1k–10k typical)
 cfg.solid_frac   = 0.50;        % volume fraction of SOLID after threshold (0..1)
 cfg.coneDeg      = [30 0 0];    % cone half-angles about x,y,z [30 0 0] = lamellar 
-cfg.rngSeed      = 1;           % reproducible
+cfg.rngSeed      = 3;           % reproducible
 cfg.remove_top_spin_frac = 0.0;   % fraction of spinodal voxels to stochastically remove in the spinodoid layer
 
 cfg.t_spin       = 1e-3;        %spinodal thickness         (vanligvis 1e-3)

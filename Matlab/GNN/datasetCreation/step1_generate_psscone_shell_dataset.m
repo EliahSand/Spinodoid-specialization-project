@@ -29,14 +29,15 @@ outRoot = fullfile(gnnRoot, 'data', 'raw', 'samples');
 baseParams = struct();
 baseParams.N = 128;
 baseParams.L = 40e-3;
-baseParams.lambda_vox = 50;
-baseParams.bandwidth = 2.5;
+baseParams.lambda_vox = 25;
+baseParams.bandwidth = 0.125;
 baseParams.nModes = 4000;
 baseParams.solid_frac = 0.50;
 baseParams.coneDeg = [30 0 0];
 baseParams.slice_count = 8;
 baseParams.tilesXY = [1 1];
 baseParams.remove_top_spin_frac = 0.0;
+baseParams.rngSeed = 3;
 % ----------------------------------------------
 
 if ~isfolder(outRoot)

@@ -13,11 +13,11 @@ baseParams = struct();
 baseParams.N = 128;
 baseParams.L = 40e-3;
 baseParams.lambda_vox = 25;
-baseParams.bandwidth = 2;
+baseParams.bandwidth = 0.125;
 baseParams.nModes = 4000;
 baseParams.solid_frac = 0.50;
 baseParams.coneDeg = [30 0 0];
-baseParams.rngSeed = 1;
+baseParams.rngSeed = 3;
 baseParams.t_spin = 1e-3;
 baseParams.t_base = 2e-3;
 baseParams.tilesXY = [1 1];
@@ -57,20 +57,20 @@ end
 % Local-defect sweep (cracks + holes, no GRF).
 % Builds cfg.local_cases: 35 cases = 5 baselines + 15 cracks + 15 holes.
 % ----------------------------------------------------------------
-crackSev.length_m  = 15e-3;
+crackSev.length_m  = 25e-3;  % 62.5% of L (was 15e-3)
 crackSev.theta_deg = 0;
-crackSev.width_m   = 1e-3;   % 3 voxels wide at N=128, L=40e-3
+crackSev.width_m   = 2e-3;   % wider so the band is clearly visible
 
-holeSev.radius_m = 3e-3;
+holeSev.radius_m = 5e-3;     % radius 12.5% of L (was 3e-3)
 holeSev.count    = 1;
 
 % Canonical positions stored as fractions of L.
 canonPos = struct( ...
-    'name', {'center',    'quarter',    'mid_edge_x', 'mid_edge_y'}, ...
-    'frac', {[0.50 0.50], [0.25 0.25], [0.50 0.00],  [0.00 0.50]});
+    'name', {'center',    'quarter'}, ...
+    'frac', {[0.50 0.50], [0.25 0.25]});
 
-crackPosNames = {'center', 'quarter', 'mid_edge_x'};
-holePosNames  = {'center', 'quarter', 'mid_edge_y'};
+crackPosNames = {'center', 'quarter'};
+holePosNames  = {'center', 'quarter'};
 
 nLocalPerAngle = 1 + numel(crackPosNames) + numel(holePosNames);  % 7
 nLocalTotal    = nAng * nLocalPerAngle;  % 35
