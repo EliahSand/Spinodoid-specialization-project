@@ -51,6 +51,12 @@ def parse_args():
         action="store_true",
         help="Recovery mode: skip Abaqus and package existing midplane_results_shell.csv files.",
     )
+    parser.add_argument(
+        "--max-parallel",
+        type=int,
+        default=1,
+        help="Number of concurrent Abaqus jobs (default: 1, i.e. serial).",
+    )
     argv = _extract_user_cli_args(sys.argv[1:])
     args, _unknown = parser.parse_known_args(argv)
     return args
@@ -195,7 +201,7 @@ def resolve_repo_root(script_path):
     )
 
 
-def run_batch_shell(batch_script_path, roots, abaqus_cmd, packaged_results_root, dry_run):
+def run_batch_shell(batch_script_path, roots, abaqus_cmd, packaged_results_root, dry_run, max_parallel=1):
     argv_backup = list(sys.argv)
     try:
         sys.argv = [
@@ -206,6 +212,8 @@ def run_batch_shell(batch_script_path, roots, abaqus_cmd, packaged_results_root,
             abaqus_cmd,
             "--packaged-results-root",
             packaged_results_root,
+            "--max-parallel",
+            str(int(max_parallel)),
         ]
         if dry_run:
             sys.argv.append("--dry-run")
@@ -251,6 +259,7 @@ def main():
             abaqus_cmd=DEFAULT_ABAQUS_CMD,
             packaged_results_root=dataset_root,
             dry_run=args.dry_run,
+            max_parallel=args.max_parallel,
         )
 
         cleaned_runs = 0

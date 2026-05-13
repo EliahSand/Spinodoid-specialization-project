@@ -17,8 +17,8 @@ cfg.L            = 40e-3;        % physical box length (mm)    (vanligvis 40e-3)
 
 %   NB! Husk vox size is L/N
 
-cfg.lambda_vox   = 50;          % target feature wavelength in voxels (~rib/ligament spacing)
-cfg.bandwidth    = 2.5;           % relative shell thickness around target |k| (0.1–0.3)
+cfg.lambda_vox   = 25;          % target feature wavelength in voxels (~rib/ligament spacing)
+cfg.bandwidth    = 0.125;           % relative shell thickness around target |k| (0.1–0.3)
 cfg.nModes       = 4000;        % number of Fourier modes to sample (1k–10k typical)
 cfg.solid_frac   = 0.50;        % volume fraction of SOLID after threshold (0..1)
 cfg.coneDeg      = [30 0 0];    % cone half-angles about x,y,z [30 0 0] = lamellar 

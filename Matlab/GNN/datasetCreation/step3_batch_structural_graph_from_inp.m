@@ -20,7 +20,11 @@ addpath(scriptDir);
 addpath(helpersDir);
 
 samplesRoot = fullfile(gnnRoot, 'data', 'raw', 'samples');
-datasetRoot = fullfile(gnnRoot, 'data', 'dataset_hybrid', 'samples');
+
+% Pick which detail level to build. Uncomment exactly one.
+DETAIL_LEVEL = 1.00;  datasetRoot = fullfile(gnnRoot, 'data', 'dataset_hybrid_d100', 'samples');
+%DETAIL_LEVEL = 0.30;  datasetRoot = fullfile(gnnRoot, 'data', 'dataset_hybrid_d030', 'samples');
+
 ensure_dir(datasetRoot);
 
 gnnPrepRoot = fullfile(repoRoot, 'Matlab', 'gnn_prep_spinodal');
@@ -85,7 +89,7 @@ err = cell(1, nTasks);
 
 parfor i = 1:nTasks
     try
-        process_single_run(taskInpPaths{i}, datasetRoot, taskRunNames{i});
+        process_single_run(taskInpPaths{i}, datasetRoot, taskRunNames{i}, DETAIL_LEVEL);
         ok(i) = true;
     catch ME
         err{i} = sprintf('[%s] %s', taskRunNames{i}, ME.message);
@@ -106,7 +110,7 @@ if nFail > 0
     end
 end
 
-function process_single_run(inpPath, datasetRoot, runName)
+function process_single_run(inpPath, datasetRoot, runName, detailLevel)
 inpData = read_abaqus_inp(inpPath);
 fullGraph = build_full_reference_graph_gnn(inpData, ...
     'ElsetName', 'SPINODAL_SHELL', ...
@@ -114,7 +118,7 @@ fullGraph = build_full_reference_graph_gnn(inpData, ...
     'PatternPriority', {'spinodal', 'top'});
 
 structuralGraph = extract_structural_graph(fullGraph, ...
-    'DetailLevel', 1.00, ...
+    'DetailLevel', detailLevel, ...
     'MinIslandNodes', 1);
 
 sampleDir = fullfile(datasetRoot, runName);
@@ -145,7 +149,7 @@ gnn_data.num_nodes  = structuralGraph.num_nodes;
 gnn_data.x          = [structuralGraph.node_coords, structuralGraph.node_radius, boundaryFlag];  % N×4
 gnn_data.tr_ratio   = tr_ratio;
 gnn_data.ang_deg    = ang_deg;
-gnn_data.detail_level = 1.00;
+gnn_data.detail_level = detailLevel;
 gnn_data.schema_version = 3;
 
 dense_data = rasterize_full_reference_graph(fullGraph, 128);

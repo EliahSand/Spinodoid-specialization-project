@@ -756,22 +756,28 @@ def create_step_and_bcs(model, assembly, inst_name):
 
 
 def run_job(model_name, job_name, work_dir):
-    if job_name in mdb.jobs:
-        del mdb.jobs[job_name]
-    job = mdb.Job(name=job_name, model=model_name,
-                  description='Spinodal shell tensile test',
-                  numCpus=4, numDomains=4, multiprocessingMode=DEFAULT,
-                  explicitPrecision=SINGLE, nodalOutputPrecision=SINGLE)
-    cwd = os.getcwd()
-    if not os.path.isdir(work_dir):
-        os.makedirs(work_dir)
-    os.chdir(work_dir)
-    try:
-        job.submit()
-        job.waitForCompletion()
-    finally:
-        os.chdir(cwd)
-    return os.path.join(work_dir, job_name + '.odb')
+      if job_name in mdb.jobs:
+          del mdb.jobs[job_name]
+  
+      try:
+          n_cpus = max(1, int(os.environ.get('ABQ_NUMCPUS', '2')))
+      except (TypeError, ValueError):
+          n_cpus = 2
+
+      job = mdb.Job(name=job_name, model=model_name,
+                    description='Spinodal shell tensile test',
+                    numCpus=n_cpus, numDomains=n_cpus, multiprocessingMode=DEFAULT,
+                    explicitPrecision=SINGLE, nodalOutputPrecision=SINGLE)
+      cwd = os.getcwd()
+      if not os.path.isdir(work_dir):
+          os.makedirs(work_dir)
+      os.chdir(work_dir)
+      try:
+          job.submit()
+          job.waitForCompletion()
+      finally:
+          os.chdir(cwd)
+      return os.path.join(work_dir, job_name + '.odb')
 
 
 def main():

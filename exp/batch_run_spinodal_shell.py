@@ -35,6 +35,10 @@ def parse_args():
                    help='Re-run even if the target ODB already exists.')
     p.add_argument('--dry-run', action='store_true',
                    help='Print commands without executing.')
+    p.add_argument('--max-parallel', type=int, default=1,
+                   help='Number of Abaqus jobs to run concurrently (default: 1, i.e. serial).')
+    p.add_argument('--poll-interval', type=float, default=2.0,
+                   help='Seconds between polls of in-flight workers (default: 2.0).')
     return p.parse_args()
 
 
@@ -138,6 +142,90 @@ def cleanup_fea_shell_dir(fea_shell_dir, dry_run):
     return removed
 
 
+def _post_process_finished_job(job, args):
+    """Cleanup + package after a successful Abaqus run. Returns (cleaned, removed, cleanup_skip, packaged)."""
+    mid_csv_path = job['mid_csv_path']
+    fea_shell_dir = os.path.dirname(mid_csv_path)
+    if not os.path.isfile(mid_csv_path):
+        print('[WARN] %s: midplane_results_shell.csv not found; keeping Abaqus artifacts.' % job['inp_path'])
+        return (0, 0, 1, 0)
+    n = cleanup_fea_shell_dir(fea_shell_dir, dry_run=False)
+    print('[CLEAN] %s: removed %d item(s).' % (fea_shell_dir, n))
+    packaged = 0
+    ok, dst = package_midplane_csv(
+        args.packaged_results_root, job['manifest_path'], mid_csv_path,
+        overwrite=args.overwrite, dry_run=False)
+    if ok:
+        packaged = 1
+        print('[PACK] %s -> %s' % (mid_csv_path, dst))
+    return (1, n, 0, packaged)
+
+
+def _run_jobs_pool(jobs, args):
+    """Run queued jobs with up to args.max_parallel concurrent Abaqus processes.
+
+    Each job dict: {'manifest_path', 'inp_path', 'mid_csv_path'}.
+    Returns aggregate (cleaned_runs, removed_items, cleanup_skips, packaged_runs).
+    """
+    cleaned_runs = 0
+    removed_items = 0
+    cleanup_skips = 0
+    packaged_runs = 0
+
+    in_flight = []  # list of dicts: {'proc', 'job', 't0'}
+    next_idx = 0
+    n_jobs = len(jobs)
+    max_parallel = max(1, int(args.max_parallel))
+
+    try:
+        while next_idx < n_jobs or in_flight:
+            # Launch new workers up to capacity.
+            while len(in_flight) < max_parallel and next_idx < n_jobs:
+                job = jobs[next_idx]
+                cmd = '"%s" cae noGUI="%s" -- "%s"' % (args.abaqus_cmd, args.script, job['inp_path'])
+                print('[RUN ] (%d/%d) %s' % (next_idx + 1, n_jobs, cmd))
+                proc = subprocess.Popen(cmd, shell=True)
+                in_flight.append({'proc': proc, 'job': job, 't0': time.time()})
+                next_idx += 1
+
+            # Poll for completion.
+            time.sleep(args.poll_interval)
+            still_running = []
+            for entry in in_flight:
+                ret = entry['proc'].poll()
+                if ret is None:
+                    still_running.append(entry)
+                    continue
+                dt = time.time() - entry['t0']
+                job = entry['job']
+                if ret != 0:
+                    print('[FAIL] %s (exit %s, %.1fs)' % (job['inp_path'], ret, dt))
+                else:
+                    print('[DONE] %s (%.1fs)' % (job['inp_path'], dt))
+                    c, r, s, p = _post_process_finished_job(job, args)
+                    cleaned_runs += c
+                    removed_items += r
+                    cleanup_skips += s
+                    packaged_runs += p
+            in_flight = still_running
+    except KeyboardInterrupt:
+        print('\n[INTERRUPT] Terminating %d in-flight job(s)...' % len(in_flight))
+        for entry in in_flight:
+            try:
+                entry['proc'].terminate()
+            except Exception:
+                pass
+        # Best-effort wait so terminated children don't leave zombies.
+        for entry in in_flight:
+            try:
+                entry['proc'].wait()
+            except Exception:
+                pass
+        raise
+
+    return cleaned_runs, removed_items, cleanup_skips, packaged_runs
+
+
 def main():
     args = parse_args()
     manifests = find_manifests(args.roots)
@@ -150,6 +238,9 @@ def main():
     removed_items = 0
     cleanup_skips = 0
     packaged_runs = 0
+
+        # --- Planning pass: decide skip / package-only / queue-for-run per manifest ---
+    jobs_to_run = []
 
     for manifest_path in manifests:
         try:
@@ -193,33 +284,26 @@ def main():
                 continue
             print('[SKIP] %s: result exists (%s). Use --overwrite to rerun.' % (inp_path, marker_path))
             continue
+        
+        jobs_to_run.append({
+            'manifest_path': manifest_path,
+            'inp_path': inp_path,
+            'mid_csv_path': mid_csv_path,
+        })
 
-        cmd = '"%s" cae noGUI="%s" -- "%s"' % (args.abaqus_cmd, args.script, inp_path)
-        print('[RUN ] %s' % cmd)
-        if args.dry_run:
-            continue
-        t0 = time.time()
-        ret = subprocess.call(cmd, shell=True)
-        dt = time.time() - t0
-        if ret != 0:
-            print('[FAIL] %s (exit %s, %.1fs)' % (inp_path, ret, dt))
-        else:
-            print('[DONE] %s (%.1fs)' % (inp_path, dt))
-            fea_shell_dir = os.path.dirname(mid_csv_path)
-            if not os.path.isfile(mid_csv_path):
-                cleanup_skips += 1
-                print('[WARN] %s: midplane_results_shell.csv not found; keeping Abaqus artifacts.' % inp_path)
-            else:
-                n = cleanup_fea_shell_dir(fea_shell_dir, dry_run=False)
-                cleaned_runs += 1
-                removed_items += n
-                print('[CLEAN] %s: removed %d item(s).' % (fea_shell_dir, n))
-                ok, dst = package_midplane_csv(
-                    args.packaged_results_root, manifest_path, mid_csv_path,
-                    overwrite=args.overwrite, dry_run=False)
-                if ok:
-                    packaged_runs += 1
-                    print('[PACK] %s -> %s' % (mid_csv_path, dst))
+    print('Planned: %d job(s) to run, max_parallel=%d.' % (len(jobs_to_run), args.max_parallel))
+    if args.dry_run:
+        for j in jobs_to_run:
+            print('[DRY ] would run: "%s" cae noGUI="%s" -- "%s"' %
+                  (args.abaqus_cmd, args.script, j['inp_path']))
+    elif jobs_to_run:
+        c, r, s, p = _run_jobs_pool(jobs_to_run, args)
+        cleaned_runs += c
+        removed_items += r
+        cleanup_skips += s
+        packaged_runs += p
+
+       
 
     batch_dt = time.time() - batch_start
     print('Batch complete in %.1f seconds (%.2f minutes)' % (batch_dt, batch_dt / 60.0))

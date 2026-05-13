@@ -17,8 +17,8 @@ cfg.L            = 40e-3;        % physical box length (mm)    (vanligvis 40e-3)
 
 %   NB! Husk vox size is L/N
 
-cfg.lambda_vox   = 50;          % target feature wavelength in voxels (~rib/ligament spacing)
-cfg.bandwidth    = 2.5;           % relative shell thickness around target |k| (0.1–0.3)
+cfg.lambda_vox   = 25;          % target feature wavelength in voxels (~rib/ligament spacing)
+cfg.bandwidth    = 0.125;           % relative shell thickness around target |k| (0.1–0.3)
 cfg.nModes       = 4000;        % number of Fourier modes to sample (1k–10k typical)
 cfg.solid_frac   = 0.50;        % volume fraction of SOLID after threshold (0..1)
 cfg.coneDeg      = [30 0 0];    % cone half-angles about x,y,z (90= isotropic). e.g. [90 90 90]
@@ -28,11 +28,11 @@ cfg.remove_top_spin_frac = 0.0;   % fraction of spinodal voxels to stochasticall
 
 cfg.t_spin       = 1e-3;        %spinodal thickness         (vanligvis 1e-3)
 cfg.t_base       = 2e-3;        %base thickness             (vanligvis 2e-3)
-cfg.tilesXY      = [3 3];       %tiling for periodicity
+cfg.tilesXY      = [1 1];       %tiling for periodicity
 cfg.add_outer_skin_vox = 0;
 cfg.slice_count  = 8;           %builds 2D spinodal patterm for shell by averaging top "slice_count" for 3D field, then majority thresholding
 cfg.align_with_cube = true;
-cfg.lamellarAngleDeg = 30;       %lamellar angle to x-axis
+cfg.lamellarAngleDeg = 90;       %lamellar angle to x-axis
 cfg.resultsRoot  = [];
 
 fields = fieldnames(cfg);
