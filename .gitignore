@@ -26,3 +26,7 @@ Matlab/GNN/experiments/pca_relationships/*
 abaqus.rpy.*
 
 litterature/*
+
+.vscode/
+
+Matlab/GNN/theory.tex

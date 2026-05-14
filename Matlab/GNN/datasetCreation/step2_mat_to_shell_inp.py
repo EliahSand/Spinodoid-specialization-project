@@ -2,8 +2,8 @@
 """Step 2 wrapper: reuse existing batch MAT->shell INP converter.
 
 How to run:
-  python3 Matlab/GNN/datasetCreation/step2_mat_to_shell_inp.py
-  python3 Matlab/GNN/datasetCreation/step2_mat_to_shell_inp.py --dry-run
+  python Matlab/GNN/datasetCreation/step2_mat_to_shell_inp.py
+  python Matlab/GNN/datasetCreation/step2_mat_to_shell_inp.py --dry-run
 """
 
 from __future__ import annotations
@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 DEFAULT_SAMPLES_ROOT = "Matlab/GNN/data/raw/samples"
@@ -24,6 +25,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    t0 = time.time()
     args = parse_args()
     repo_root = Path(__file__).resolve().parents[3]
     script = repo_root / "exp" / "batch_mat_to_shell_inp.py"
@@ -42,6 +44,8 @@ def main() -> None:
 
     print("Running:", " ".join(cmd))
     ret = subprocess.call(cmd, cwd=str(repo_root))
+    dt = time.time() - t0
+    print('Step 2 total time: %.1f seconds (%.2f minutes)' % (dt, dt / 60.0))
     if ret != 0:
         raise SystemExit(ret)
 

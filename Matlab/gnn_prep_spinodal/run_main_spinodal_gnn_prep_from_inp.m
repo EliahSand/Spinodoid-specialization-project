@@ -9,7 +9,7 @@ addpath(genpath(fullfile(moduleRoot, 'src')));
 
 % Example defaults (project-specific sample).
 matlabRoot = fileparts(moduleRoot);
-inpPath = fullfile(matlabRoot, 'results/sheets/lamellar/sheetCone_tr50_ang030_lamellar_N128_1x1_run02/sheet_shell.inp');
+inpPath = fullfile(matlabRoot, 'GNN/data/raw/samples/tr50/ang030/sheetCone_tr50_ang030_lamellar_N128_1x1/sheet_shell.inp');
 
 tic;
 outputs = main_spinodal_gnn_prep_from_inp(inpPath, ...

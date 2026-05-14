@@ -28,7 +28,7 @@ cfg.remove_top_spin_frac = 0.0;   % fraction of spinodal voxels to stochasticall
 
 cfg.t_spin       = 1e-3;        %spinodal thickness         (vanligvis 1e-3)
 cfg.t_base       = 2e-3;        %base thickness             (vanligvis 2e-3)
-cfg.tilesXY      = [1 1];       %tiling for periodicity
+cfg.tilesXY      = [2 3];       %tiling for periodicity
 cfg.add_outer_skin_vox = 0;
 cfg.slice_count  = 8;           %builds 2D spinodal patterm for shell by averaging top "slice_count" for 3D field, then majority thresholding
 cfg.align_with_cube = true;

@@ -10,8 +10,8 @@ addpath(genpath(fullfile(gnnRoot, 'helpers')));
 %% Config
 
 training       = true;
-modelMode      = 'hybrid';   % 'hybrid', 'dense_only', or 'graph_only'
-subsetFraction = 1;        % use <1 only for smoke tests
+modelMode      = 'dense_only';   % 'hybrid', 'dense_only', or 'graph_only'
+subsetFraction = 0.5;        % use <1 only for smoke tests
 
 K              = 4;
 hiddenDim      = 96;
@@ -46,8 +46,8 @@ end
 runName = sprintf('%s_%s', datestr(now, 'yyyymmdd_HHMMSS'), modelMode);
 
 targetsDir = fullfile(gnnRoot, 'data', 'dataset', 'targets');
-samplesDir = fullfile(gnnRoot, 'data', 'dataset_hybrid', 'samples');
-hybridTargetsDir = fullfile(gnnRoot, 'data', 'dataset_hybrid', 'targets');
+samplesDir = fullfile(gnnRoot, 'data', 'dataset_hybrid_d100', 'samples');
+hybridTargetsDir = fullfile(gnnRoot, 'data', 'dataset_hybrid_d100', 'targets');
 bestDir = fullfile(scriptDir, 'best', runName);
 if ~isfolder(bestDir), mkdir(bestDir); end
 
@@ -319,7 +319,8 @@ print_metrics('Val', valMetrics, nComp);
 print_metrics('Test', testMetrics, nComp);
 
 metricsFile = fullfile(bestDir, 'final_metrics.mat');
-save(metricsFile, 'trainMetrics', 'valMetrics', 'testMetrics', 'cfg');
+save(metricsFile, 'trainMetrics', 'valMetrics', 'testMetrics', 'cfg', ...
+    'train_idx', 'val_idx', 'test_idx', 'train_ids', 'val_ids', 'test_ids');
 
 %% Plots
 
@@ -330,13 +331,13 @@ plot(valEpochs, val_losses(valEpochs), '-b', 'LineWidth', 1.5);
 xlabel('Epoch'); ylabel('Weighted MSE (standardized PCA)');
 legend('Train', 'Validation', 'Location', 'northeast');
 title(sprintf('Hybrid training curve (%s)', modelMode));
-exportgraphics(hLoss, fullfile(bestDir, 'loss_curve.png'), 'Resolution', 150);
+savefig(hLoss, fullfile(bestDir, 'loss_curve.fig'));
 
 hR2 = figure;
 plot(find(~isnan(val_u3_R2)), val_u3_R2(~isnan(val_u3_R2)), '-k', 'LineWidth', 1.5);
 xlabel('Epoch'); ylabel('Validation u3 R2');
 title(sprintf('Validation u3 R2 (%s)', modelMode));
-exportgraphics(hR2, fullfile(bestDir, 'val_u3_r2.png'), 'Resolution', 150);
+savefig(hR2, fullfile(bestDir, 'val_u3_r2.fig'));
 
 %% Plot: PCA component scatter (2 × 4)
 
@@ -354,7 +355,7 @@ for c = 1:nComp
     axis equal tight;
 end
 sgtitle(sprintf('PCA components: truth vs prediction (validation) [%s]', modelMode));
-exportgraphics(hZ, fullfile(bestDir, 'pred_vs_truth.png'), 'Resolution', 150);
+savefig(hZ, fullfile(bestDir, 'pred_vs_truth.fig'));
 
 %% Plot: u3(s) profile overlays (3 samples)
 
@@ -371,7 +372,7 @@ for k = 1:nShow
     if k == 1, legend('True', 'Pred', 'Location', 'best'); end
 end
 sgtitle(sprintf('u_3(s) midpoint profile: truth vs prediction (validation) [%s]', modelMode));
-exportgraphics(hU3, fullfile(bestDir, 'u3_profiles.png'), 'Resolution', 150);
+savefig(hU3, fullfile(bestDir, 'u3_profiles.fig'));
 
 %% Local helpers
 

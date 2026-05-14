@@ -22,8 +22,8 @@ addpath(helpersDir);
 samplesRoot = fullfile(gnnRoot, 'data', 'raw', 'samples');
 
 % Pick which detail level to build. Uncomment exactly one.
-DETAIL_LEVEL = 1.00;  datasetRoot = fullfile(gnnRoot, 'data', 'dataset_hybrid_d100', 'samples');
-%DETAIL_LEVEL = 0.30;  datasetRoot = fullfile(gnnRoot, 'data', 'dataset_hybrid_d030', 'samples');
+%DETAIL_LEVEL = 1.00;  datasetRoot = fullfile(gnnRoot, 'data', 'dataset_hybrid_d100', 'samples');
+DETAIL_LEVEL = 0.30;  datasetRoot = fullfile(gnnRoot, 'data', 'dataset_hybrid_d030', 'samples');
 
 ensure_dir(datasetRoot);
 

@@ -40,8 +40,9 @@ tsV = Nz - tbV;
 
 spinLayer  = sheetMask(:,:,tbV+1:end);
 
-% Top-down projection (solid if any z in spin layer is solid).
-topDown = squeeze(any(spinLayer, 3));
+% sheetMask is [row=x_phys, col=y_phys, z]; transpose so image() puts
+% physical x on the display x-axis.
+topDown = squeeze(any(spinLayer, 3)).';
 
 % Try to load the matching baseline (same angle, same Matlab/...) so we can
 % colour the defect (material removed) separately from the spinodoid.
@@ -53,7 +54,7 @@ end
 
 % Mid-z cross-section.
 midZ     = round(tsV / 2);
-midSlice = spinLayer(:,:,max(1, midZ));
+midSlice = spinLayer(:,:,max(1, midZ)).';
 
 % Parse metadata title and defect outline.
 titleStr = '';
@@ -125,6 +126,9 @@ end
 function outlines = local_defect_outlines(localDefects)
 % Build a cell array of [Nx2] polylines (in mm) describing each defect's full
 % intended footprint (independent of where it actually intersects material).
+% apply_local_defects writes spinLayer(iy, ix, :), which reflects the intended
+% (x,y) across y=x in physical space. Mirror the outline so it aligns with
+% the stamped defect in the displayed image.
 outlines = {};
 if isstruct(localDefects) && isscalar(localDefects)
     specs = localDefects;
@@ -151,7 +155,8 @@ for i = 1:numel(specs)
             hx = (L_mm/2) * [cx; sx];
             hw = (W_mm/2) * [-sx; cx];
             corners = [hx + hw, -hx + hw, -hx - hw, hx - hw, hx + hw];
-            outlines{end+1} = [x0_mm + corners(1,:); y0_mm + corners(2,:)]'; %#ok<AGROW>
+            poly = [x0_mm + corners(1,:); y0_mm + corners(2,:)]';
+            outlines{end+1} = poly(:, [2 1]); %#ok<AGROW>
         case 'hole'
             r_mm  = d.radius_m * 1e3;
             count = 1;
@@ -162,7 +167,8 @@ for i = 1:numel(specs)
                 off = spiral(min(ci, size(spiral,1)), :) * 2.5 * r_mm;
                 cxm = x0_mm + off(1);
                 cym = y0_mm + off(2);
-                outlines{end+1} = [cxm + r_mm * cos(th); cym + r_mm * sin(th)]'; %#ok<AGROW>
+                poly = [cxm + r_mm * cos(th); cym + r_mm * sin(th)]';
+                outlines{end+1} = poly(:, [2 1]); %#ok<AGROW>
             end
     end
 end
@@ -197,7 +203,7 @@ try
     Sb = load(matPath, 'sheetMask');
     mb = Sb.sheetMask;
     spin = mb(:,:,tbV+1:end);
-    topDown = squeeze(any(spin, 3));
+    topDown = squeeze(any(spin, 3)).';
 catch
     topDown = [];
 end

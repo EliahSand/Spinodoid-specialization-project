@@ -1,17 +1,19 @@
-%% Plot true-vs-predicted overlays for a completed hybrid GNN run.
+%% Plot true-vs-predicted overlays for a completed GNN run.
 %
-% This script uses saved predictions from final_metrics.mat. It does not
-% rerun inference or retrain the model.
+% Works for any modelMode saved by Main_hybrid_vision.m
+% ('hybrid', 'dense_only', 'graph_only'). Uses saved predictions from
+% final_metrics.mat. It does not rerun inference or retrain the model.
 
 clear; close all; clc;
 
 %% Config
 
-SPLIT = 'val';          % 'train', 'val', or 'test'
+SPLIT = 'train';          % 'train', 'val', or 'test'
 N_SHOW = 12;
-SELECTION = 'even';     % 'even', 'first', 'random', 'best', 'median', or 'worst'
+SELECTION = 'best';     % 'even', 'first', 'random', 'best', 'median', or 'worst'
 RNG_SEED = 2;
-RUN_DIR = '';           % empty = newest completed hybrid run matching current targets
+MODE = 'any';           % 'hybrid', 'dense_only', 'graph_only', or 'any'
+RUN_DIR = '';           % empty = newest completed run matching MODE and current targets
 
 scriptDir = fileparts(mfilename('fullpath'));
 gnnRoot = fileparts(scriptDir);
@@ -26,7 +28,7 @@ pm = load(fullfile(targetsDir, 'pca_model.mat'), 's_grid');
 ut = load(fullfile(targetsDir, 'u3_targets.mat'), 'U3_mat', 'sample_ids');
 
 if isempty(RUN_DIR)
-    RUN_DIR = newest_compatible_run(fullfile(gnnRoot, 'models', 'best'), pt);
+    RUN_DIR = newest_compatible_run(fullfile(gnnRoot, 'models', 'best'), pt, MODE);
 end
 
 metricsFile = fullfile(RUN_DIR, 'final_metrics.mat');
@@ -35,12 +37,20 @@ if ~isfile(metricsFile)
         'final_metrics.mat not found: %s', metricsFile);
 end
 
-mf = load(metricsFile, 'trainMetrics', 'valMetrics', 'testMetrics', 'cfg');
+mf = load(metricsFile);
 
-if isfield(mf, 'cfg') && isfield(mf.cfg, 'subsetFraction') && mf.cfg.subsetFraction < 1
+if isfield(mf, 'cfg') && isfield(mf.cfg, 'modelMode')
+    runMode = mf.cfg.modelMode;
+else
+    runMode = infer_mode_from_dirname(RUN_DIR);
+end
+
+hasSavedIdx = all(isfield(mf, {'train_idx', 'val_idx', 'test_idx'}));
+isSubset = isfield(mf, 'cfg') && isfield(mf.cfg, 'subsetFraction') && mf.cfg.subsetFraction < 1;
+if isSubset && ~hasSavedIdx
     error('plot_hybrid_overlays:subsetRun', ...
-        ['This script expects a full-split run. The selected run has ', ...
-         'subsetFraction=%.3g and does not save the selected subset indices.'], ...
+        ['Run has subsetFraction=%.3g but final_metrics.mat does not contain ', ...
+         'train_idx/val_idx/test_idx. Re-train with the updated Main_hybrid_vision.m.'], ...
         mf.cfg.subsetFraction);
 end
 
@@ -63,16 +73,19 @@ if ~isfolder(outDir), mkdir(outDir); end
 
 %% Export overlays
 
+modeLabel = mode_display_label(runMode);
+splitTag = sprintf('%s [%s]', splitLabel, modeLabel);
+
 u3File = fullfile(outDir, 'u3_true_vs_pred_overlay.png');
-plot_u3_overlay(u3File, pm.s_grid, U3_true, U3_pred, u3Rmse, sampleIds, showIdx, splitLabel);
+plot_u3_overlay(u3File, pm.s_grid, U3_true, U3_pred, u3Rmse, sampleIds, showIdx, splitTag);
 
 pcaOverlayFile = fullfile(outDir, 'pca_true_vs_pred_overlay.png');
-plot_pca_overlay(pcaOverlayFile, Z_true, Z_pred, zRmse, sampleIds, showIdx, splitLabel);
+plot_pca_overlay(pcaOverlayFile, Z_true, Z_pred, zRmse, sampleIds, showIdx, splitTag);
 
 pcaScatterFile = fullfile(outDir, 'pca_component_scatter.png');
-plot_pca_scatter(pcaScatterFile, Z_true, Z_pred, splitLabel);
+plot_pca_scatter(pcaScatterFile, Z_true, Z_pred, splitTag);
 
-fprintf('Hybrid overlay plots written to:\n  %s\n', outDir);
+fprintf('%s overlay plots written to:\n  %s\n', runMode, outDir);
 fprintf('  %s\n', u3File);
 fprintf('  %s\n', pcaOverlayFile);
 fprintf('  %s\n', pcaScatterFile);
@@ -84,16 +97,13 @@ splitLabel = lower(string(splitName));
 switch splitLabel
     case "train"
         metrics = mf.trainMetrics;
-        Z_true = pt.Z_train;
-        split_idx = pt.train_idx;
+        [Z_true, split_idx] = resolve_truth(mf, pt, 'train');
     case "val"
         metrics = mf.valMetrics;
-        Z_true = pt.Z_val;
-        split_idx = pt.val_idx;
+        [Z_true, split_idx] = resolve_truth(mf, pt, 'val');
     case "test"
         metrics = mf.testMetrics;
-        Z_true = pt.Z_test;
-        split_idx = pt.test_idx;
+        [Z_true, split_idx] = resolve_truth(mf, pt, 'test');
     otherwise
         error('plot_hybrid_overlays:badSplit', ...
             'SPLIT must be train, val, or test. Got: %s', splitName);
@@ -101,12 +111,47 @@ end
 splitLabel = char(splitLabel);
 end
 
-function runDir = newest_compatible_run(bestRoot, pt)
-dirs = dir(fullfile(bestRoot, '*_hybrid'));
+function [Z_true, split_idx] = resolve_truth(mf, pt, splitName)
+ptIdxField = sprintf('%s_idx', splitName);
+ptZField = sprintf('Z_%s', splitName);
+ptFull = pt.(ptIdxField);
+ZFull = pt.(ptZField);
+
+if isfield(mf, ptIdxField)
+    split_idx = mf.(ptIdxField);
+    [tf, pos] = ismember(split_idx, ptFull);
+    if ~all(tf)
+        error('plot_hybrid_overlays:idxMismatch', ...
+            ['Saved %s indices contain entries not in current pca_targets.mat. ', ...
+             'The dataset split has changed since this run was trained.'], ptIdxField);
+    end
+    Z_true = ZFull(pos, :);
+else
+    split_idx = ptFull;
+    Z_true = ZFull;
+end
+end
+
+function runDir = newest_compatible_run(bestRoot, pt, mode)
+modeLower = lower(string(mode));
+allowedModes = ["hybrid", "dense_only", "graph_only", "any"];
+if ~any(modeLower == allowedModes)
+    error('plot_hybrid_overlays:badMode', ...
+        'MODE must be one of hybrid, dense_only, graph_only, any. Got: %s', mode);
+end
+
+if modeLower == "any"
+    pattern = '*';
+else
+    pattern = sprintf('*_%s', char(modeLower));
+end
+
+dirs = dir(fullfile(bestRoot, pattern));
 dirs = dirs([dirs.isdir]);
+dirs = dirs(~ismember({dirs.name}, {'.', '..'}));
 if isempty(dirs)
-    error('plot_hybrid_overlays:noHybridRuns', ...
-        'No *_hybrid run directories found under %s', bestRoot);
+    error('plot_hybrid_overlays:noRuns', ...
+        'No run directories matching "%s" found under %s', pattern, bestRoot);
 end
 
 targetCounts = [size(pt.Z_train, 1), size(pt.Z_val, 1), size(pt.Z_test, 1)];
@@ -118,21 +163,58 @@ for ii = order
     if ~isfile(metricsFile)
         continue;
     end
-    s = load(metricsFile, 'trainMetrics', 'valMetrics', 'testMetrics');
+    s = load(metricsFile);
     predCounts = [size(s.trainMetrics.U3_pred, 1), ...
                   size(s.valMetrics.U3_pred, 1), ...
                   size(s.testMetrics.U3_pred, 1)];
-    if isequal(predCounts, targetCounts)
+
+    if all(isfield(s, {'train_idx', 'val_idx', 'test_idx'}))
+        idxOk = all(ismember(s.train_idx, pt.train_idx)) && ...
+                all(ismember(s.val_idx,   pt.val_idx))   && ...
+                all(ismember(s.test_idx,  pt.test_idx))  && ...
+                numel(s.train_idx) == predCounts(1) && ...
+                numel(s.val_idx)   == predCounts(2) && ...
+                numel(s.test_idx)  == predCounts(3);
+        if idxOk
+            runDir = candidate;
+            fprintf('RUN_DIR empty; using newest compatible run (mode=%s, subset=%d/%d/%d):\n  %s\n', ...
+                char(modeLower), predCounts(1), predCounts(2), predCounts(3), runDir);
+            return;
+        end
+    elseif isequal(predCounts, targetCounts)
         runDir = candidate;
-        fprintf('RUN_DIR empty; using newest compatible run:\n  %s\n', runDir);
+        fprintf('RUN_DIR empty; using newest compatible run (mode=%s, full split):\n  %s\n', ...
+            char(modeLower), runDir);
         return;
     end
 end
 
 error('plot_hybrid_overlays:noCompatibleRun', ...
-    ['No completed hybrid run under %s matches the current target counts ', ...
+    ['No completed run matching mode="%s" under %s matches the current target counts ', ...
      '[train=%d val=%d test=%d]. Set RUN_DIR manually for a compatible run.'], ...
-    bestRoot, targetCounts(1), targetCounts(2), targetCounts(3));
+    char(modeLower), bestRoot, targetCounts(1), targetCounts(2), targetCounts(3));
+end
+
+function modeName = infer_mode_from_dirname(runDir)
+[~, name] = fileparts(runDir);
+if endsWith(name, '_hybrid')
+    modeName = 'hybrid';
+elseif endsWith(name, '_dense_only')
+    modeName = 'dense_only';
+elseif endsWith(name, '_graph_only')
+    modeName = 'graph_only';
+else
+    modeName = 'unknown';
+end
+end
+
+function label = mode_display_label(modeName)
+switch lower(string(modeName))
+    case "hybrid",     label = 'hybrid (GNN+CNN)';
+    case "dense_only", label = 'CNN only';
+    case "graph_only", label = 'GNN only';
+    otherwise,         label = char(modeName);
+end
 end
 
 function check_run_matches_targets(U3_true, U3_pred, Z_true, Z_pred, runDir, splitLabel)

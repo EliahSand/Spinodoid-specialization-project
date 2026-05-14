@@ -12,8 +12,8 @@
 %% Config
 
 REPO_ROOT   = fileparts(fileparts(fileparts(fileparts(mfilename('fullpath')))));
-SAMPLES_DIR = fullfile(REPO_ROOT, 'Matlab', 'GNN', 'data', 'dataset_hybrid', 'samples');
-TARGETS_DIR = fullfile(REPO_ROOT, 'Matlab', 'GNN', 'data', 'dataset_hybrid', 'targets');
+SAMPLES_DIR = fullfile(REPO_ROOT, 'Matlab', 'GNN', 'data', 'dataset_hybrid_d100', 'samples');
+TARGETS_DIR = fullfile(REPO_ROOT, 'Matlab', 'GNN', 'data', 'dataset_hybrid_d100', 'targets');
 
 SCHEMA_VERSION = 3;
 RASTER_SIZE    = 128;

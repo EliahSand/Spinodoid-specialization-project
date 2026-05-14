@@ -1,7 +1,12 @@
 function [spinLayer, applied] = apply_local_defects(spinLayer, Svox, L, defectSpec)
 %APPLY_LOCAL_DEFECTS Stamp cracks and/or holes into the top spin layer.
 %
-%   spinLayer : logical [N x N x tsV], [row=y, col=x, z] convention (post-permute).
+%   spinLayer : logical [N x N x tsV]. Writes use `spinLayer(iy, ix, :)`,
+%               i.e. (x,y) from the spec is swapped into (row,col) — defects
+%               end up reflected across y=x in physical space. Kept this way
+%               so the in-repo cached sheet.mat files remain valid; the
+%               outline drawers in run_compare_local_defects /
+%               visualize_local_defect mirror to match.
 %   Svox      : voxel size in metres (x and y; square grid assumed).
 %   L         : physical side length of the periodic tile (metres).
 %   defectSpec: scalar struct or struct array, each entry with fields:

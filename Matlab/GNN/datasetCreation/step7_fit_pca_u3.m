@@ -13,7 +13,7 @@
 REPO_ROOT   = fileparts(fileparts(fileparts(fileparts(mfilename('fullpath')))));
 TARGETS_DIR = fullfile(REPO_ROOT, 'Matlab', 'GNN', 'data', 'dataset', 'targets');
 
-N_COMPONENTS = 8;    % 5 PCA components gives 99% variance, fewest GNN parameters to predict for the GNN
+N_COMPONENTS = 5;    % 5 PCA components gives 99% variance, fewest GNN parameters to predict for the GNN
 VAR_THRESHOLD = 0.99; % logged only — not used to truncate
 
 %% ---- Load -----------------------------------------------------------------

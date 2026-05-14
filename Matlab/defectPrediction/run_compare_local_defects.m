@@ -88,9 +88,10 @@ defectColors  = thesis_defect_colors();
 % 2. Per-angle overlays + deviation + geometry strip
 % -----------------------------------------------------------------
 for ai = 1:numel(angles)
-    ang     = angles(ai);
-    angTag  = sprintf('lam%03d', ang);
-    angDir  = fullfile(outDir, angTag);
+    ang      = angles(ai);
+    angTag   = sprintf('lam%03d', ang);
+    angLabel = sprintf('\\theta = %d°', ang);
+    angDir   = fullfile(outDir, angTag);
     ensure_dir(angDir);
 
     angMask = abs([profiles.lamellar_angle_deg] - ang) < 0.5;
@@ -109,17 +110,17 @@ for ai = 1:numel(angles)
     end
 
     plot_u3_overlay_named(angProfs, defectTagsAll, defectColors, baseline, ...
-        sprintf('%s — U_3 along midplane (x = L/2)', angTag), ...
+        sprintf('%s — U_3 along midplane (x = L/2)', angLabel), ...
         fullfile(angDir, 'u3_overlay.png'));
 
     if ~isempty(baseline)
         plot_deviation_named(angProfs, baseline, defectTagsAll, defectColors, ...
-            sprintf('%s — \\DeltaU_3 vs baseline', angTag), ...
+            sprintf('%s — \\DeltaU_3 vs baseline', angLabel), ...
             fullfile(angDir, 'u3_deviation.png'));
     end
 
     plot_geometry_strip(angProfs, defectTagsAll, ...
-        sprintf('%s — spin-layer top-down (per case)', angTag), ...
+        angLabel, ...
         fullfile(angDir, 'geometry_strip.png'));
 end
 
@@ -388,8 +389,9 @@ close(fig);
 end
 
 function [topDown, Lx_mm] = compute_top_down(S)
-% Returns topDown where row index ↔ y, column index ↔ x (matches the
-% [row=y, col=x, z] convention used by apply_local_defects).
+% PSSCone stores sheetMask as [row=x_phys, col=y_phys, z] (from ndgrid in
+% spinodal_periodic_field). image([0 Lx],[0 Lx],rgb) plots row->display_y,
+% col->display_x, so we transpose to get display_x=x_phys, display_y=y_phys.
 mask = S.sheetMask;
 N    = size(mask, 1);
 Svox = S.voxelSizeXY;
@@ -397,7 +399,7 @@ baseParams_L = 40e-3;
 t_base = 2e-3;
 tbV = max(3, round(t_base / (baseParams_L / N)));
 spinLayer = mask(:,:,tbV+1:end);
-topDown = squeeze(any(spinLayer, 3));
+topDown = squeeze(any(spinLayer, 3)).';
 Lx_mm = N * Svox * 1e3;
 end
 
@@ -419,6 +421,9 @@ end
 
 function outlines = defect_outlines(localDefects)
 % Build {[Nx2]} polylines (mm) for each defect's full intended footprint.
+% apply_local_defects writes spinLayer(iy, ix, :), which mirrors the intended
+% (x,y) across y=x in physical space. Mirror the outline the same way so it
+% lines up with the stamped defect in the geometry image.
 outlines = {};
 specs = localDefects;
 if iscell(specs), specs = [specs{:}]; end
@@ -438,7 +443,8 @@ for i = 1:numel(specs)
             hx = (L_mm/2) * [cx; sx];
             hw = (W_mm/2) * [-sx; cx];
             c = [hx + hw, -hx + hw, -hx - hw, hx - hw, hx + hw];
-            outlines{end+1} = [x0_mm + c(1,:); y0_mm + c(2,:)]'; %#ok<AGROW>
+            poly = [x0_mm + c(1,:); y0_mm + c(2,:)]';
+            outlines{end+1} = poly(:, [2 1]); %#ok<AGROW>
         case 'hole'
             r_mm  = d.radius_m * 1e3;
             count = 1;
@@ -447,8 +453,9 @@ for i = 1:numel(specs)
             th = linspace(0, 2*pi, 96);
             for ci = 1:count
                 off = spiral(min(ci, size(spiral,1)), :) * 2.5 * r_mm;
-                outlines{end+1} = [x0_mm + off(1) + r_mm * cos(th); ...
-                                   y0_mm + off(2) + r_mm * sin(th)]'; %#ok<AGROW>
+                poly = [x0_mm + off(1) + r_mm * cos(th); ...
+                        y0_mm + off(2) + r_mm * sin(th)]';
+                outlines{end+1} = poly(:, [2 1]); %#ok<AGROW>
             end
     end
 end
