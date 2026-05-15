@@ -21,9 +21,20 @@ addpath(helpersDir);
 
 samplesRoot = fullfile(gnnRoot, 'data', 'raw', 'samples');
 
-% Pick which detail level to build. Uncomment exactly one.
-%DETAIL_LEVEL = 1.00;  datasetRoot = fullfile(gnnRoot, 'data', 'dataset_hybrid_d100', 'samples');
-DETAIL_LEVEL = 0.30;  datasetRoot = fullfile(gnnRoot, 'data', 'dataset_hybrid_d030', 'samples');
+% Pick which detail level to build.
+DETAIL_LEVEL = 1.00;
+
+% Pick dataset schema version. 'V1' = legacy 4-dim node features and binary
+% edges; 'V2' adds a 5-dim edge_attr and replaces the binary boundary flag
+% with a 4-class one-hot {interior, clamped_left, loaded_right, free_top_bot}.
+% V2 writes to a parallel folder so the V1 dataset stays intact.
+DATASET_VERSION = 'V2';
+
+dsBase = sprintf('dataset_hybrid_d%03d', round(DETAIL_LEVEL * 100));
+if strcmpi(DATASET_VERSION, 'V2')
+    dsBase = [dsBase '_v2'];
+end
+datasetRoot = fullfile(gnnRoot, 'data', dsBase, 'samples');
 
 ensure_dir(datasetRoot);
 
@@ -89,7 +100,7 @@ err = cell(1, nTasks);
 
 parfor i = 1:nTasks
     try
-        process_single_run(taskInpPaths{i}, datasetRoot, taskRunNames{i}, DETAIL_LEVEL);
+        process_single_run(taskInpPaths{i}, datasetRoot, taskRunNames{i}, DETAIL_LEVEL, DATASET_VERSION);
         ok(i) = true;
     catch ME
         err{i} = sprintf('[%s] %s', taskRunNames{i}, ME.message);
@@ -110,7 +121,7 @@ if nFail > 0
     end
 end
 
-function process_single_run(inpPath, datasetRoot, runName, detailLevel)
+function process_single_run(inpPath, datasetRoot, runName, detailLevel, datasetVersion)
 inpData = read_abaqus_inp(inpPath);
 fullGraph = build_full_reference_graph_gnn(inpData, ...
     'ElsetName', 'SPINODAL_SHELL', ...
@@ -126,16 +137,24 @@ ensure_dir(sampleDir);
 
 sampleMatPath = fullfile(sampleDir, 'sample.mat');
 
-% Boundary flag: node is on the sheet perimeter if its XY is within
-% tolerance of the bounding box. Tolerance = 1e-4 × max(XY range).
+% Boundary classification from bounding box. V1 stores a single binary flag,
+% V2 stores a 4-class one-hot {interior, clamped_left, loaded_right,
+% free_top_bot}. Corner nodes are assigned in the listed priority order so
+% the encoding stays mutually exclusive.
 xy  = structuralGraph.node_coords;   % N×2
 rng_xy = max(range(xy), [], 1);
 tol    = 1e-4 * max(rng_xy);
 xLo = min(xy(:,1)); xHi = max(xy(:,1));
 yLo = min(xy(:,2)); yHi = max(xy(:,2));
-boundaryFlag = double( ...
-    xy(:,1) - xLo < tol | xHi - xy(:,1) < tol | ...
-    xy(:,2) - yLo < tol | yHi - xy(:,2) < tol);   % N×1
+
+onLeft   = xy(:,1) - xLo < tol;
+onRight  = xHi - xy(:,1) < tol;
+onTopBot = (xy(:,2) - yLo < tol) | (yHi - xy(:,2) < tol);
+
+cls_clamped  = onLeft;
+cls_loaded   = onRight  & ~cls_clamped;
+cls_free     = onTopBot & ~cls_clamped & ~cls_loaded;
+cls_interior = ~(cls_clamped | cls_loaded | cls_free);
 
 % Parse TR ratio and loading angle from folder name
 tk = regexp(runName, 'tr(\d+)', 'tokens', 'once');
@@ -146,11 +165,47 @@ ang_deg  = NaN; if ~isempty(tk), ang_deg  = str2double(tk{1}); end
 gnn_data = struct();
 gnn_data.edge_index = int32(structuralGraph.edge_index);
 gnn_data.num_nodes  = structuralGraph.num_nodes;
-gnn_data.x          = [structuralGraph.node_coords, structuralGraph.node_radius, boundaryFlag];  % N×4
 gnn_data.tr_ratio   = tr_ratio;
 gnn_data.ang_deg    = ang_deg;
 gnn_data.detail_level = detailLevel;
-gnn_data.schema_version = 3;
+
+if strcmpi(datasetVersion, 'V2')
+    bcOneHot = zeros(size(xy,1), 4);
+    bcOneHot(cls_interior, 1) = 1;
+    bcOneHot(cls_clamped,  2) = 1;
+    bcOneHot(cls_loaded,   3) = 1;
+    bcOneHot(cls_free,     4) = 1;
+
+    gnn_data.x = [structuralGraph.node_coords, structuralGraph.node_radius, bcOneHot];  % N×7
+
+    % 5-dim per-edge feature: [L, (rn-rm)/L (2 cols), mean_r, |dr|]
+    ei = double(structuralGraph.edge_index);   % 2×E
+    E  = size(ei, 2);
+    if E > 0
+        rn   = xy(ei(1,:), :);
+        rm   = xy(ei(2,:), :);
+        diff = rn - rm;
+        L    = sqrt(sum(diff.^2, 2));
+        Lsf  = max(L, 1e-12);
+        unitDir = diff ./ Lsf;
+        radii   = structuralGraph.node_radius(:);
+        rn_r = radii(ei(1,:));
+        rm_r = radii(ei(2,:));
+        mean_r = (rn_r + rm_r) / 2;
+        abs_dr = abs(rn_r - rm_r);
+        edge_attr = [L, unitDir, mean_r, abs_dr];   % E×5
+    else
+        edge_attr = zeros(0, 5);
+    end
+    gnn_data.edge_attr           = single(edge_attr);
+    gnn_data.schema_version      = 4;
+    gnn_data.schema_version_label = 'V2';
+else
+    boundaryFlag = double(~cls_interior);
+    gnn_data.x = [structuralGraph.node_coords, structuralGraph.node_radius, boundaryFlag];  % N×4
+    gnn_data.schema_version       = 3;
+    gnn_data.schema_version_label = 'V1';
+end
 
 dense_data = rasterize_full_reference_graph(fullGraph, 128);
 

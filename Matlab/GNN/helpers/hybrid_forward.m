@@ -1,18 +1,22 @@
-function Zhat = hybrid_forward(params, X, A_hat, K, nodeMask, Dense, G_global, gpuUse, dropoutRate, useGraph, useDense)
+function Zhat = hybrid_forward(params, X, ei_cell, ea_cell, K, nodeMask, Dense, G_global, gpuUse, dropoutRate, useGraph, useDense)
 %HYBRID_FORWARD Dense-raster CNN + structural-GNN forward pass.
 %   X:        F x maxN x B
+%   ei_cell:  cell{B}, each 2×Eg edge index (1-based)
+%   ea_cell:  cell{B}, each Fe×Eg edge_attr or [] for binary edges
 %   Dense:    H x W x 4 x B
 %   G_global: nGlobal x 1 x B
+%
+%   The normalized adjacency is rebuilt each forward pass via
+%   build_norm_adjacency so gradients flow back into params.MLP_edge.
 
-if nargin < 9 || isempty(dropoutRate), dropoutRate = 0; end
-if nargin < 10 || isempty(useGraph), useGraph = true; end
-if nargin < 11 || isempty(useDense), useDense = true; end
+if nargin < 10 || isempty(dropoutRate), dropoutRate = 0; end
+if nargin < 11 || isempty(useGraph), useGraph = true; end
+if nargin < 12 || isempty(useDense), useDense = true; end
 
 if ~isa(G_global, 'dlarray'), G_global = dlarray(G_global); end
-B = size(G_global, 3);
 
 if useGraph
-    hGraph = graph_branch(params, X, A_hat, K, nodeMask, gpuUse);
+    hGraph = graph_branch(params, X, ei_cell, ea_cell, K, nodeMask, gpuUse);
 else
     graphDim = 2 * size(params.GraphEmbedding.W, 1) * (K + 1);
     hGraph = 0 * repmat(G_global(1, :, :), graphDim, 1, 1);
@@ -42,14 +46,34 @@ h = relu(pagemtimes(params.Fusion2.W, h) + params.Fusion2.b);
 Zhat = pagemtimes(params.Decoder.W, h) + params.Decoder.b;
 end
 
-function h = graph_branch(params, X, A_hat, K, nodeMask, gpuUse)
+function h = graph_branch(params, X, ei_cell, ea_cell, K, nodeMask, gpuUse)
 if ~isa(X, 'dlarray'), X = dlarray(X); end
-B = size(X, 3);
+B    = size(X, 3);
+maxN = size(X, 2);
+
+% Derive per-graph node counts from the mask (1×maxN×B logical).
+N_vec_batch = reshape(sum(double(nodeMask), 2), [], 1);
+
+useEdgeAttr = ~isempty(ea_cell) && isfield(params, 'MLP_edge') && ...
+    any(cellfun(@(c) ~isempty(c), ea_cell));
+
+if useEdgeAttr
+    edgeMLP = params.MLP_edge;
+else
+    edgeMLP = [];
+end
+
+A_hat = build_norm_adjacency(ei_cell, N_vec_batch, maxN, ea_cell, edgeMLP);
 
 A_dense = cell(B, 1);
 for b = 1:B
-    A = single(full(A_hat{b}));
-    if gpuUse, A = gpuArray(A); end
+    A = A_hat{b};
+    if ~isa(A, 'dlarray')
+        % Sparse binary path returns a sparse matrix — densify for the
+        % per-graph dense multiply below.
+        A = single(full(A));
+        if gpuUse, A = gpuArray(A); end
+    end
     A_dense{b} = A;
 end
 
@@ -64,7 +88,7 @@ for i = 1:K
     v = pagemtimes(params.("Graph_"+i).W, u) + params.("Graph_"+i).b;
     Vagg = zeros(size(v), 'like', v);
     for b = 1:B
-        Vagg(:, :, b) = dlarray((A_dense{b} * v(:, :, b).').');
+        Vagg(:, :, b) = (A_dense{b} * v(:, :, b).').';
     end
     u = relu(u + Vagg);
     u = u .* mask;

@@ -12,11 +12,23 @@
 %% Config
 
 REPO_ROOT   = fileparts(fileparts(fileparts(fileparts(mfilename('fullpath')))));
-SAMPLES_DIR = fullfile(REPO_ROOT, 'Matlab', 'GNN', 'data', 'dataset_hybrid_d100', 'samples');
-TARGETS_DIR = fullfile(REPO_ROOT, 'Matlab', 'GNN', 'data', 'dataset_hybrid_d100', 'targets');
 
-SCHEMA_VERSION = 3;
-RASTER_SIZE    = 128;
+% Pick which version's samples to aggregate. 'V2' adds per-edge attributes
+% (EA_cell) and 4-class boundary one-hot; output goes to the matching
+% dataset_hybrid_d<level>_v2 folder so V1 stays intact.
+DETAIL_LEVEL    = 1.00;
+DATASET_VERSION = 'V2';
+
+dsBase = sprintf('dataset_hybrid_d%03d', round(DETAIL_LEVEL * 100));
+if strcmpi(DATASET_VERSION, 'V2')
+    dsBase = [dsBase '_v2'];
+end
+SAMPLES_DIR = fullfile(REPO_ROOT, 'Matlab', 'GNN', 'data', dsBase, 'samples');
+TARGETS_DIR = fullfile(REPO_ROOT, 'Matlab', 'GNN', 'data', dsBase, 'targets');
+
+SCHEMA_VERSION       = 4;
+SCHEMA_VERSION_LABEL = DATASET_VERSION;
+RASTER_SIZE          = 128;
 
 %% Discover sample folders
 
@@ -42,22 +54,30 @@ fprintf('Found %d graphs. Aggregating...\n', n);
 sample_ids = sampleDirs;   % cell(n,1) of folder names
 X_cell     = cell(n, 1);
 ei_cell    = cell(n, 1);
+EA_cell    = cell(n, 1);
 N_vec      = zeros(n, 1);
 TR_vec     = nan(n, 1);
 ANG_vec    = nan(n, 1);
 Dense_cell = cell(n, 1);
 has_dense_count = 0;
+has_edge_attr_count = 0;
 
 t0 = tic;
 for i = 1:n
     d  = load(fullfile(SAMPLES_DIR, sample_ids{i}, 'sample.mat'));
     gd = d.gnn_data;
 
-    X_cell{i}  = single(gd.x.');          % 4 x N  (x, y, radius, boundary)
+    X_cell{i}  = single(gd.x.');          % F x N  (V1: 4, V2: 7)
     ei_cell{i} = double(gd.edge_index);   % 2 x E
     N_vec(i)   = gd.num_nodes;
     TR_vec(i)  = gd.tr_ratio;
     ANG_vec(i) = gd.ang_deg;
+    if isfield(gd, 'edge_attr') && ~isempty(gd.edge_attr)
+        EA_cell{i} = single(gd.edge_attr.');   % 5 x E
+        has_edge_attr_count = has_edge_attr_count + 1;
+    else
+        EA_cell{i} = zeros(0, 0, 'single');
+    end
     if isfield(d, 'dense_data') && isfield(d.dense_data, 'raster')
         Dense_cell{i} = uint8(d.dense_data.raster);
         has_dense_count = has_dense_count + 1;
@@ -75,13 +95,15 @@ fprintf('Loaded %d graphs in %.1f s\n', n, toc(t0));
 
 if ~isfolder(TARGETS_DIR), mkdir(TARGETS_DIR); end
 
-created_at     = datestr(now, 'yyyy-mm-ddTHH:MM:SS');
-schema_version = SCHEMA_VERSION;
+created_at           = datestr(now, 'yyyy-mm-ddTHH:MM:SS');
+schema_version       = SCHEMA_VERSION;
+schema_version_label = SCHEMA_VERSION_LABEL;
 
 outFile = fullfile(TARGETS_DIR, 'graphs_all.mat');
-save(outFile, 'sample_ids', 'X_cell', 'ei_cell', 'N_vec', 'TR_vec', 'ANG_vec', 'Dense_cell', ...
-    'schema_version', 'created_at', '-v7.3');
-fprintf('Saved: %s\n', outFile);
+save(outFile, 'sample_ids', 'X_cell', 'ei_cell', 'EA_cell', 'N_vec', 'TR_vec', 'ANG_vec', ...
+    'Dense_cell', 'schema_version', 'schema_version_label', 'created_at', '-v7.3');
+fprintf('Saved: %s  (schema=%s, edge_attr present in %d/%d)\n', ...
+    outFile, schema_version_label, has_edge_attr_count, n);
 
 %% Manifest
 
@@ -93,12 +115,14 @@ catch
 end
 
 manifest = struct( ...
-    'n_graphs',        n, ...
-    'n_dense_native',  has_dense_count, ...
-    'raster_size',     RASTER_SIZE, ...
-    'schema_version',  schema_version, ...
-    'git_sha',         git_sha, ...
-    'created_at',      created_at);
+    'n_graphs',             n, ...
+    'n_dense_native',       has_dense_count, ...
+    'n_edge_attr',          has_edge_attr_count, ...
+    'raster_size',          RASTER_SIZE, ...
+    'schema_version',       schema_version, ...
+    'schema_version_label', schema_version_label, ...
+    'git_sha',              git_sha, ...
+    'created_at',           created_at);
 
 manifestFile = fullfile(TARGETS_DIR, 'graphs_all_manifest.json');
 fid = fopen(manifestFile, 'w');
@@ -109,7 +133,10 @@ fprintf('Done.\n');
 
 function raster = rasterize_structural_graph(X, gridSize)
 xy = double(X(1:2, :).');
-if size(X, 1) >= 4
+if size(X, 1) >= 7
+    % V2 one-hot: cols 4..7 = [interior, clamped, loaded, free_top_bot].
+    boundary = any(X(5:7, :), 1).';
+elseif size(X, 1) >= 4
     boundary = logical(X(4, :).');
 else
     boundary = false(size(xy, 1), 1);

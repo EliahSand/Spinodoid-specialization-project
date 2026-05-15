@@ -14,6 +14,14 @@ Step 3 (INP-only) complete: ok=467 skip_no_inp=0 skip_done=5533 fail=0 (1.34 min
 
 fukka opp med å flytte før ferdig
 
+
+
+detailLevel 30%.    Step 3 (INP-only) complete: ok=6000 skip_no_inp=0 skip_done=0 fail=0 (17.93 min)
+
+
+
+dataset DL 100% V2 Step 3 (INP-only) complete: ok=6000 skip_no_inp=0 skip_done=0 fail=0 (19.39 min)
+
 ----------------------------------------
 step 4 abaqus 
 
@@ -33,6 +41,13 @@ step 8 verify PCA
 ----------------------------------------
 step 9 
 Loaded 6000 graphs in 283.9 s
+
+
+
+DL 30% Loaded 6000 graphs in 346.1 s
+
+
+DL 100% V2 Loaded 6000 graphs in 365.3 s
 
 ----------------------------------------
 

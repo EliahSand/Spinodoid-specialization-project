@@ -138,16 +138,15 @@ function run_real_smoke(repoRoot, gnnRoot, datasetDir)
     run(fullfile(datasetDir, 'step9_aggregate_mat_spline_graphs.m'));
     assert(isfile(fullfile(targetsOut, 'graphs_all.mat')), 'Smoke aggregate was not created.');
 
-    [X_cell, ei_cell, N_vec, ~, Dense] = load_hybrid_graph_dataset(sampleIds, samplesOut);
+    [X_cell, ei_cell, N_vec, ~, Dense, ea_cell] = load_hybrid_graph_dataset(sampleIds, samplesOut);
     trainMask = true(numel(sampleIds), 1);
     [X_pad, nodeMask] = pad_and_normalize_hybrid_graphs(X_cell, N_vec, trainMask, []);
-    A_hat = build_norm_adjacency(ei_cell, N_vec, max(N_vec));
     DenseInput = prepare_dense_raster_inputs(Dense);
 
     F = size(X_pad, 1);
     params = init_hybrid_params(F, 8, [4, 8, 16], 16, 2, 1, 3);
     globals = dlarray(zeros(3, 1, numel(sampleIds), 'single'));
-    Zhat = hybrid_forward(params, X_pad, A_hat, 1, single(nodeMask), ...
+    Zhat = hybrid_forward(params, X_pad, ei_cell, ea_cell, 1, single(nodeMask), ...
         DenseInput, globals, false, 0, true, true);
     assert(isequal(size(Zhat), [2, 1, numel(sampleIds)]), 'Unexpected forward output size.');
 end

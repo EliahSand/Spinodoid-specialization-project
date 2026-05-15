@@ -12,6 +12,15 @@ for i = 1:K
     params.("Graph_"+i).b = zeros(hiddenDim, 1);
 end
 
+% Edge-attribute MLP: maps 5-dim edge_attr → scalar pre-activation, then
+% softplus to a positive per-edge weight in build_norm_adjacency.
+edgeFeatDim = 5;
+edgeHidden  = 16;
+params.MLP_edge.W1 = initializeGlorot([edgeHidden, edgeFeatDim]);
+params.MLP_edge.b1 = zeros(edgeHidden, 1);
+params.MLP_edge.W2 = initializeGlorot([1, edgeHidden]);
+params.MLP_edge.b2 = zeros(1, 1);
+
 params.CNN1.W = initializeGlorotConv([5, 5, 4, cnnChannels(1)]);
 params.CNN1.b = zeros(1, 1, cnnChannels(1));
 params.CNN2.W = initializeGlorotConv([3, 3, cnnChannels(1), cnnChannels(2)]);

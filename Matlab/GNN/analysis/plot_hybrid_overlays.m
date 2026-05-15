@@ -10,9 +10,9 @@ clear; close all; clc;
 
 SPLIT = 'train';          % 'train', 'val', or 'test'
 N_SHOW = 12;
-SELECTION = 'best';     % 'even', 'first', 'random', 'best', 'median', or 'worst'
+SELECTION = 'median';     % 'even', 'first', 'random', 'best', 'median', or 'worst'
 RNG_SEED = 2;
-MODE = 'any';           % 'hybrid', 'dense_only', 'graph_only', or 'any'
+MODE = 'dense_only';           % 'hybrid', 'dense_only', 'graph_only', or 'any'
 RUN_DIR = '';           % empty = newest completed run matching MODE and current targets
 
 scriptDir = fileparts(mfilename('fullpath'));

@@ -10,8 +10,15 @@ addpath(genpath(fullfile(gnnRoot, 'helpers')));
 %% Config
 
 training       = true;
-modelMode      = 'dense_only';   % 'hybrid', 'dense_only', or 'graph_only'
-subsetFraction = 0.5;        % use <1 only for smoke tests
+modelMode      = 'GNN';   % 'hybrid', 'CNN', or 'GNN'
+subsetFraction = 1;        % fraction of total dataset
+
+% Which on-disk graph dataset to consume. V1 = legacy 4-dim node features
+% with binary edges; V2 = 4-class boundary one-hot + 5-dim edge_attr fed
+% through MLP_edge to weight the GCN aggregation. The actual schema label
+% gets read back from the aggregate after loading and recorded in cfg.
+detailLevel        = 1.00;
+datasetVersionPref = 'V2';   % 'V1' or 'V2'
 
 K              = 4;
 hiddenDim      = 96;
@@ -35,9 +42,9 @@ end
 switch modelMode
     case 'hybrid'
         useGraph = true;  useDense = true;
-    case 'dense_only'
+    case 'CNN'
         useGraph = false; useDense = true;
-    case 'graph_only'
+    case 'GNN'
         useGraph = true;  useDense = false;
     otherwise
         error('Unknown modelMode: %s', modelMode);
@@ -45,9 +52,13 @@ end
 
 runName = sprintf('%s_%s', datestr(now, 'yyyymmdd_HHMMSS'), modelMode);
 
+dsBase = sprintf('dataset_hybrid_d%03d', round(detailLevel * 100));
+if strcmpi(datasetVersionPref, 'V2')
+    dsBase = [dsBase '_v2'];
+end
 targetsDir = fullfile(gnnRoot, 'data', 'dataset', 'targets');
-samplesDir = fullfile(gnnRoot, 'data', 'dataset_hybrid_d100', 'samples');
-hybridTargetsDir = fullfile(gnnRoot, 'data', 'dataset_hybrid_d100', 'targets');
+samplesDir = fullfile(gnnRoot, 'data', dsBase, 'samples');
+hybridTargetsDir = fullfile(gnnRoot, 'data', dsBase, 'targets');
 bestDir = fullfile(scriptDir, 'best', runName);
 if ~isfolder(bestDir), mkdir(bestDir); end
 
@@ -115,7 +126,8 @@ nTest = numel(test_ids);
 
 all_ids = [train_ids; val_ids; test_ids];
 fprintf('Loading %d hybrid samples...\n', numel(all_ids));
-[allX, allEI, allN, G_all, Dense_all] = load_hybrid_graph_dataset(all_ids, samplesDir);
+[allX, allEI, allN, G_all, Dense_all, allEA, datasetVersion] = load_hybrid_graph_dataset(all_ids, samplesDir);
+fprintf('Dataset version on disk: %s\n', datasetVersion);
 
 nAll = nTrain + nVal + nTest;
 trainLocal = (1:nTrain)';
@@ -129,7 +141,6 @@ maxN = max(allN);
 fprintf('maxN=%d  nAll=%d  raster=%dx%d\n', maxN, nAll, size(Dense_all, 1), size(Dense_all, 2));
 
 [X_pad, nodeMask, normStats] = pad_and_normalize_hybrid_graphs(allX, allN, trainMask, []);
-A_hat = build_norm_adjacency(allEI, allN, maxN);
 Dense_input = prepare_dense_raster_inputs(Dense_all);
 
 %% Standardize PCA targets and globals
@@ -214,7 +225,7 @@ if training
             idx = perm(si:ei);
 
             [loss, grad] = dlfeval(lossfcn, params, ...
-                toGpu(X_pad(:, :, idx)), A_hat(idx), K, toGpu(M(:, :, idx)), ...
+                toGpu(X_pad(:, :, idx)), allEI(idx), allEA(idx), K, toGpu(M(:, :, idx)), ...
                 toGpu(Dense_input(:, :, :, idx)), dlarray(toGpu(G_all_std(:, :, idx))), gpuUse, ...
                 toGpu(Z_target(:, :, idx)), loss_w, dropoutRate, useGraph, useDense);
 
@@ -229,12 +240,12 @@ if training
 
         if epoch == 1 || mod(epoch, valFreq) == 0
             valLoss = evaluate_hybrid_loss(lossfcn, params, valLocal, evalBatchSize, ...
-                X_pad, A_hat, K, M, Dense_input, G_all_std, gpuUse, toGpu, ...
+                X_pad, allEI, allEA, K, M, Dense_input, G_all_std, gpuUse, toGpu, ...
                 Z_target, loss_w, useGraph, useDense);
             val_losses(epoch) = valLoss;
 
             Zhat_val_std = predict_hybrid(params, valLocal, evalBatchSize, ...
-                X_pad, A_hat, K, M, Dense_input, G_all_std, gpuUse, toGpu, useGraph, useDense);
+                X_pad, allEI, allEA, K, M, Dense_input, G_all_std, gpuUse, toGpu, useGraph, useDense);
             valMetrics = evaluate_hybrid_metrics(Zhat_val_std, Z_val, Z_mean, Z_std, ...
                 coeff, u3_mean, U3_mat(val_idx, :), explained);
             val_u3_R2(epoch) = valMetrics.u3_R2;
@@ -283,7 +294,8 @@ if training
         'maxEpochs', maxEpochs, 'valFreq', valFreq, 'patience', patience, ...
         'minDeltaR2', minDeltaR2, ...
         'bestEpoch', bestEpoch, 'bestValR2', bestValR2, 'bestValLoss', bestValLoss, ...
-        'nComp', nComp, 'nGlobal', nGlobal);
+        'nComp', nComp, 'nGlobal', nGlobal, ...
+        'datasetVersion', datasetVersion, 'detailLevel', detailLevel);
 
     params_cpu = dlupdate(@gather, params);
     params_for_eval = params;
@@ -300,11 +312,11 @@ end
 %% Final evaluation
 
 Zhat_train_std = predict_hybrid(params, trainLocal, evalBatchSize, ...
-    X_pad, A_hat, K, M, Dense_input, G_all_std, gpuUse, toGpu, useGraph, useDense);
+    X_pad, allEI, allEA, K, M, Dense_input, G_all_std, gpuUse, toGpu, useGraph, useDense);
 Zhat_val_std = predict_hybrid(params, valLocal, evalBatchSize, ...
-    X_pad, A_hat, K, M, Dense_input, G_all_std, gpuUse, toGpu, useGraph, useDense);
+    X_pad, allEI, allEA, K, M, Dense_input, G_all_std, gpuUse, toGpu, useGraph, useDense);
 Zhat_test_std = predict_hybrid(params, testLocal, evalBatchSize, ...
-    X_pad, A_hat, K, M, Dense_input, G_all_std, gpuUse, toGpu, useGraph, useDense);
+    X_pad, allEI, allEA, K, M, Dense_input, G_all_std, gpuUse, toGpu, useGraph, useDense);
 
 trainMetrics = evaluate_hybrid_metrics(Zhat_train_std, Z_train, Z_mean, Z_std, ...
     coeff, u3_mean, U3_mat(train_idx, :), explained);
@@ -313,7 +325,8 @@ valMetrics = evaluate_hybrid_metrics(Zhat_val_std, Z_val, Z_mean, Z_std, ...
 testMetrics = evaluate_hybrid_metrics(Zhat_test_std, Z_test, Z_mean, Z_std, ...
     coeff, u3_mean, U3_mat(test_idx, :), explained);
 
-fprintf('\nHybrid vision final metrics (%s):\n', modelMode);
+fprintf('\nHybrid vision final metrics (%s) [dataset=%s, detail=%.2f]:\n', ...
+    modelMode, cfg.datasetVersion, cfg.detailLevel);
 print_metrics('Train', trainMetrics, nComp);
 print_metrics('Val', valMetrics, nComp);
 print_metrics('Test', testMetrics, nComp);
@@ -376,26 +389,26 @@ savefig(hU3, fullfile(bestDir, 'u3_profiles.fig'));
 
 %% Local helpers
 
-function Zhat = predict_hybrid(params, localIdx, evalBatchSize, X_pad, A_hat, K, M, Dense_input, G_all_std, gpuUse, toGpu, useGraph, useDense)
+function Zhat = predict_hybrid(params, localIdx, evalBatchSize, X_pad, allEI, allEA, K, M, Dense_input, G_all_std, gpuUse, toGpu, useGraph, useDense)
     parts = cell(ceil(numel(localIdx) / evalBatchSize), 1);
     p = 0;
     for bi = 1:evalBatchSize:numel(localIdx)
         p = p + 1;
         idx = localIdx(bi:min(bi + evalBatchSize - 1, numel(localIdx)));
-        parts{p} = hybrid_forward(params, toGpu(X_pad(:, :, idx)), A_hat(idx), K, ...
+        parts{p} = hybrid_forward(params, toGpu(X_pad(:, :, idx)), allEI(idx), allEA(idx), K, ...
             toGpu(M(:, :, idx)), toGpu(Dense_input(:, :, :, idx)), ...
             dlarray(toGpu(G_all_std(:, :, idx))), gpuUse, 0.0, useGraph, useDense);
     end
     Zhat = cat(3, parts{:});
 end
 
-function avgLoss = evaluate_hybrid_loss(lossfcn, params, localIdx, evalBatchSize, X_pad, A_hat, K, M, Dense_input, G_all_std, gpuUse, toGpu, Z_target, loss_w, useGraph, useDense)
+function avgLoss = evaluate_hybrid_loss(lossfcn, params, localIdx, evalBatchSize, X_pad, allEI, allEA, K, M, Dense_input, G_all_std, gpuUse, toGpu, Z_target, loss_w, useGraph, useDense)
     totalLoss = 0;
     totalN = 0;
     for bi = 1:evalBatchSize:numel(localIdx)
         idx = localIdx(bi:min(bi + evalBatchSize - 1, numel(localIdx)));
         loss = dlfeval(lossfcn, params, ...
-            toGpu(X_pad(:, :, idx)), A_hat(idx), K, toGpu(M(:, :, idx)), ...
+            toGpu(X_pad(:, :, idx)), allEI(idx), allEA(idx), K, toGpu(M(:, :, idx)), ...
             toGpu(Dense_input(:, :, :, idx)), dlarray(toGpu(G_all_std(:, :, idx))), gpuUse, ...
             toGpu(Z_target(:, :, idx)), loss_w, 0.0, useGraph, useDense);
         nBatch = numel(idx);
