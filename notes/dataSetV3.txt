@@ -22,6 +22,9 @@ detailLevel 30%.    Step 3 (INP-only) complete: ok=6000 skip_no_inp=0 skip_done=
 
 dataset DL 100% V2 Step 3 (INP-only) complete: ok=6000 skip_no_inp=0 skip_done=0 fail=0 (19.39 min)
 
+
+Step 3 (INP-only) complete: ok=6000 skip_no_inp=0 skip_done=0 fail=0 (26.43 min)
+
 ----------------------------------------
 step 4 abaqus 
 
@@ -48,6 +51,8 @@ DL 30% Loaded 6000 graphs in 346.1 s
 
 
 DL 100% V2 Loaded 6000 graphs in 365.3 s
+
+DL 30% V3 Loaded 6000 graphs in 551.5 s
 
 ----------------------------------------
 

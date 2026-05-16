@@ -1,13 +1,14 @@
 function [X_cell, ei_cell, N_vec, G_mat, Dense, EA_cell, datasetVersion] = load_hybrid_graph_dataset(sample_ids, samplesDir)
 %LOAD_HYBRID_GRAPH_DATASET Load graph + dense raster inputs for hybrid models.
-%   X_cell{g}        - F x Ng single. V1: [x; y; radius; boundary]   (F=4)
-%                                     V2: [x; y; radius; bc_oneHot4] (F=7)
+%   X_cell{g}        - F x Ng single. V1: [x; y; radius; boundary]              (F=4)
+%                                     V2: [x; y; radius; bc_oneHot4]            (F=7)
+%                                     V3: [x; y; radius; bc_oneHot4; dist_load] (F=8)
 %   ei_cell{g}       - 2 x Eg double edge index
 %   N_vec(g)         - node count
 %   G_mat            - G x 2 [tr_ratio, ang_deg]
 %   Dense            - H x W x 2 x G uint8 [occupancy, boundary]
-%   EA_cell{g}       - 5 x Eg single edge_attr (V2). Empty for V1 graphs.
-%   datasetVersion   - 'V1' or 'V2' character vector
+%   EA_cell{g}       - 5 x Eg single edge_attr (V2/V3). Empty for V1 graphs.
+%   datasetVersion   - 'V1', 'V2', or 'V3' character vector
 
 persistent agg aggMap hasDense hasGlobals hasEdgeAttr versionLabel
 

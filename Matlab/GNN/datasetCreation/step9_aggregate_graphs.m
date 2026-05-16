@@ -14,19 +14,28 @@
 REPO_ROOT   = fileparts(fileparts(fileparts(fileparts(mfilename('fullpath')))));
 
 % Pick which version's samples to aggregate. 'V2' adds per-edge attributes
-% (EA_cell) and 4-class boundary one-hot; output goes to the matching
-% dataset_hybrid_d<level>_v2 folder so V1 stays intact.
-DETAIL_LEVEL    = 1.00;
-DATASET_VERSION = 'V2';
+% (EA_cell) and 4-class boundary one-hot; 'V3' additionally augments the
+% graph with raster-boundary nodes (radius=0) and replaces boundary-distance
+% features with a single dist_to_loaded scalar (node F=8). Output goes to
+% the matching dataset_hybrid_d<level>_v{2,3} folder so earlier datasets
+% stay intact.
+DETAIL_LEVEL    = 0.3;
+DATASET_VERSION = 'V3';
 
 dsBase = sprintf('dataset_hybrid_d%03d', round(DETAIL_LEVEL * 100));
-if strcmpi(DATASET_VERSION, 'V2')
-    dsBase = [dsBase '_v2'];
+switch upper(DATASET_VERSION)
+    case 'V2', dsBase = [dsBase '_v2'];
+    case 'V3', dsBase = [dsBase '_v3'];
 end
 SAMPLES_DIR = fullfile(REPO_ROOT, 'Matlab', 'GNN', 'data', dsBase, 'samples');
 TARGETS_DIR = fullfile(REPO_ROOT, 'Matlab', 'GNN', 'data', dsBase, 'targets');
 
-SCHEMA_VERSION       = 4;
+switch upper(DATASET_VERSION)
+    case 'V1', SCHEMA_VERSION = 3;
+    case 'V2', SCHEMA_VERSION = 4;
+    case 'V3', SCHEMA_VERSION = 5;
+    otherwise, error('step9:badVersion', 'Unknown DATASET_VERSION %s', DATASET_VERSION);
+end
 SCHEMA_VERSION_LABEL = DATASET_VERSION;
 RASTER_SIZE          = 128;
 
@@ -67,7 +76,7 @@ for i = 1:n
     d  = load(fullfile(SAMPLES_DIR, sample_ids{i}, 'sample.mat'));
     gd = d.gnn_data;
 
-    X_cell{i}  = single(gd.x.');          % F x N  (V1: 4, V2: 7)
+    X_cell{i}  = single(gd.x.');          % F x N  (V1: 4, V2: 7, V3: 8)
     ei_cell{i} = double(gd.edge_index);   % 2 x E
     N_vec(i)   = gd.num_nodes;
     TR_vec(i)  = gd.tr_ratio;

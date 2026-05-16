@@ -2,6 +2,8 @@ function [X_pad, nodeMask, normStats] = pad_and_normalize_hybrid_graphs(X_cell, 
 %PAD_AND_NORMALIZE_HYBRID_GRAPHS Pad structural graphs for the hybrid model.
 %   V1 layout: F=4 — [x, y, radius, boundary_flag]. Boundary thresholded to {0,1}.
 %   V2 layout: F=7 — [x, y, radius, bc_oneHot4]. One-hot already in {0,1}; pass through.
+%   V3 layout: F=8 — [x, y, radius, bc_oneHot4, dist_to_loaded]. dist_to_loaded is
+%                    already in [0,1] from step3; pass through.
 %   Coordinates are box-normalized per graph; radius is z-scored with train stats.
 
 G    = numel(N_vec);

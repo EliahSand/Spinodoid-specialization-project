@@ -15,22 +15,24 @@ subsetFraction = 1;        % fraction of total dataset
 
 % Which on-disk graph dataset to consume. V1 = legacy 4-dim node features
 % with binary edges; V2 = 4-class boundary one-hot + 5-dim edge_attr fed
-% through MLP_edge to weight the GCN aggregation. The actual schema label
-% gets read back from the aggregate after loading and recorded in cfg.
-detailLevel        = 1.00;
-datasetVersionPref = 'V2';   % 'V1' or 'V2'
+% through MLP_edge to weight the GCN aggregation; V3 = V2 plus raster
+% boundary-node augmentation (radius=0 surface nodes) and dist_to_loaded
+% scalar (F=8). The actual schema label gets read back from the aggregate
+% after loading and recorded in cfg.
+detailLevel        = 0.3;
+datasetVersionPref = 'V3';   % 'V1', 'V2', or 'V3'
 
-K              = 4;
-hiddenDim      = 96;
+K              = 8;
+hiddenDim      = 192;
 cnnChannels    = [32, 64, 128];
 fusionDim      = 192;
-dropoutRate    = 0.35;
+dropoutRate    = 0.45;
 batchSize      = 16;
 evalBatchSize  = 32;
 maxEpochs      = 300;
-lr0            = 7e-4;
-decay_rate     = 0.985;
-weight_decay   = 2e-4;
+lr0            = 3e-4;
+decay_rate     = 0.99;
+weight_decay   = 1e-3;
 valFreq        = 5;
 patience       = 10;
 minDeltaR2     = 1e-4;
@@ -53,8 +55,9 @@ end
 runName = sprintf('%s_%s', datestr(now, 'yyyymmdd_HHMMSS'), modelMode);
 
 dsBase = sprintf('dataset_hybrid_d%03d', round(detailLevel * 100));
-if strcmpi(datasetVersionPref, 'V2')
-    dsBase = [dsBase '_v2'];
+switch upper(datasetVersionPref)
+    case 'V2', dsBase = [dsBase '_v2'];
+    case 'V3', dsBase = [dsBase '_v3'];
 end
 targetsDir = fullfile(gnnRoot, 'data', 'dataset', 'targets');
 samplesDir = fullfile(gnnRoot, 'data', dsBase, 'samples');

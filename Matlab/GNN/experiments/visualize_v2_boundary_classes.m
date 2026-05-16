@@ -9,7 +9,7 @@
 
 scriptDir = fileparts(mfilename('fullpath'));
 gnnRoot   = fileparts(scriptDir);
-SAMPLES_DIR = fullfile(gnnRoot, 'data', 'dataset_hybrid_d100_v2', 'samples');
+SAMPLES_DIR = fullfile(gnnRoot, 'data', 'dataset_hybrid_d030_v3', 'samples');
 SAMPLE_NAME = '';   % e.g. 'tr50_ang030_lamellar_N128_1x1'; '' picks first
 
 if isempty(SAMPLE_NAME)
@@ -33,9 +33,12 @@ fprintf('Loading: %s\n', matPath);
 d = load(matPath);
 gd = d.gnn_data;
 
-assert(strcmpi(string(gd.schema_version_label), 'V2'), ...
-    'Expected V2 sample, got schema_version_label=%s', string(gd.schema_version_label));
-assert(size(gd.x, 2) == 7, 'Expected 7-dim node features; got %d.', size(gd.x, 2));
+ver = char(string(gd.schema_version_label));
+assert(any(strcmpi(ver, {'V2', 'V3'})), ...
+    'Expected V2 or V3 sample, got schema_version_label=%s', ver);
+expectF = 7 + strcmpi(ver, 'V3');   % V2:7, V3:8 (extra dist_to_loaded)
+assert(size(gd.x, 2) == expectF, ...
+    'Expected %d-dim node features for %s; got %d.', expectF, ver, size(gd.x, 2));
 
 xy = gd.x(:, 1:2);
 oneHot = gd.x(:, 4:7);

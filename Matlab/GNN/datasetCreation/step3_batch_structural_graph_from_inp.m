@@ -22,17 +22,21 @@ addpath(helpersDir);
 samplesRoot = fullfile(gnnRoot, 'data', 'raw', 'samples');
 
 % Pick which detail level to build.
-DETAIL_LEVEL = 1.00;
+DETAIL_LEVEL = 0.3;
 
 % Pick dataset schema version. 'V1' = legacy 4-dim node features and binary
 % edges; 'V2' adds a 5-dim edge_attr and replaces the binary boundary flag
-% with a 4-class one-hot {interior, clamped_left, loaded_right, free_top_bot}.
-% V2 writes to a parallel folder so the V1 dataset stays intact.
-DATASET_VERSION = 'V2';
+% with a 4-class one-hot {interior, clamped_left, loaded_right, free_top_bot};
+% 'V3' adds raster-based boundary node augmentation (radius=0 surface nodes,
+% one edge to the nearest centerline node) and replaces boundary-distance
+% features with a single dist_to_loaded scalar (node F becomes 8).
+% Each version writes to its own folder so older datasets stay intact.
+DATASET_VERSION = 'V3';
 
 dsBase = sprintf('dataset_hybrid_d%03d', round(DETAIL_LEVEL * 100));
-if strcmpi(DATASET_VERSION, 'V2')
-    dsBase = [dsBase '_v2'];
+switch upper(DATASET_VERSION)
+    case 'V2', dsBase = [dsBase '_v2'];
+    case 'V3', dsBase = [dsBase '_v3'];
 end
 datasetRoot = fullfile(gnnRoot, 'data', dsBase, 'samples');
 
@@ -137,8 +141,13 @@ ensure_dir(sampleDir);
 
 sampleMatPath = fullfile(sampleDir, 'sample.mat');
 
+% Dense raster is needed up-front for V3 (it drives the raster-boundary
+% augmentation). For V1/V2 the same raster is also saved alongside the
+% sample for the CNN branch.
+dense_data = rasterize_full_reference_graph(fullGraph, 128);
+
 % Boundary classification from bounding box. V1 stores a single binary flag,
-% V2 stores a 4-class one-hot {interior, clamped_left, loaded_right,
+% V2/V3 store a 4-class one-hot {interior, clamped_left, loaded_right,
 % free_top_bot}. Corner nodes are assigned in the listed priority order so
 % the encoding stays mutually exclusive.
 xy  = structuralGraph.node_coords;   % N×2
@@ -169,7 +178,8 @@ gnn_data.tr_ratio   = tr_ratio;
 gnn_data.ang_deg    = ang_deg;
 gnn_data.detail_level = detailLevel;
 
-if strcmpi(datasetVersion, 'V2')
+switch upper(datasetVersion)
+case 'V2'
     bcOneHot = zeros(size(xy,1), 4);
     bcOneHot(cls_interior, 1) = 1;
     bcOneHot(cls_clamped,  2) = 1;
@@ -178,38 +188,184 @@ if strcmpi(datasetVersion, 'V2')
 
     gnn_data.x = [structuralGraph.node_coords, structuralGraph.node_radius, bcOneHot];  % N×7
 
-    % 5-dim per-edge feature: [L, (rn-rm)/L (2 cols), mean_r, |dr|]
     ei = double(structuralGraph.edge_index);   % 2×E
-    E  = size(ei, 2);
-    if E > 0
-        rn   = xy(ei(1,:), :);
-        rm   = xy(ei(2,:), :);
-        diff = rn - rm;
-        L    = sqrt(sum(diff.^2, 2));
-        Lsf  = max(L, 1e-12);
-        unitDir = diff ./ Lsf;
-        radii   = structuralGraph.node_radius(:);
-        rn_r = radii(ei(1,:));
-        rm_r = radii(ei(2,:));
-        mean_r = (rn_r + rm_r) / 2;
-        abs_dr = abs(rn_r - rm_r);
-        edge_attr = [L, unitDir, mean_r, abs_dr];   % E×5
-    else
-        edge_attr = zeros(0, 5);
-    end
-    gnn_data.edge_attr           = single(edge_attr);
-    gnn_data.schema_version      = 4;
+    edge_attr = build_v2_edge_attr(ei, xy, structuralGraph.node_radius(:));
+    gnn_data.edge_attr            = single(edge_attr);
+    gnn_data.schema_version       = 4;
     gnn_data.schema_version_label = 'V2';
-else
+
+case 'V3'
+    % --- Per-wall boundary augmentation. For each wall, group occupied
+    %     perimeter pixels by their nearest centerline node:
+    %       k >= 2 (perpendicular contact / fan-out): add ONE boundary
+    %               node at the group centroid with a single spur to c.
+    %       k == 1 (parallel contact / no fan-out): relabel c directly
+    %               with the wall's class instead of adding a node.
+    %     Centerline nodes that aren't the nearest of any wall pixel keep
+    %     class 'interior'. Relabel priority: clamp(2) > load(3) > free(4).
+    [newXY, newCls, newParent, relIdx, relCls] = ...
+        compute_v3_boundary_augmentation(xy, dense_data);
+
+    classIdxCenter = ones(size(xy, 1), 1);   % interior by default
+    for ri = 1:numel(relIdx)
+        cIdx  = relIdx(ri);
+        newC  = relCls(ri);
+        if classIdxCenter(cIdx) == 1 || newC < classIdxCenter(cIdx)
+            classIdxCenter(cIdx) = newC;
+        end
+    end
+
+    Nb = size(newXY, 1);
+    Nc = size(xy, 1);
+
+    radius_c = structuralGraph.node_radius(:);
+    xy_aug     = [xy; newXY];
+    radius_aug = [radius_c; zeros(Nb, 1)];
+
+    % --- New edges: each new boundary node b connects to its parent c.
+    %     Stored as (c; b) so (rn - rm)/L = (rc - rb)/L, matching the spec's
+    %     unit_dir direction for the new boundary edges.
+    ei_old = double(structuralGraph.edge_index);   % 2×E_old
+    newEdges = zeros(2, Nb);
+    for b = 1:Nb
+        newEdges(:, b) = [newParent(b); Nc + b];
+    end
+    ei_aug = [ei_old, newEdges];
+
+    edge_attr_aug = build_v2_edge_attr(ei_aug, xy_aug, radius_aug);
+
+    classIdxAll          = [classIdxCenter; newCls];
+    bcOneHot             = zeros(Nc + Nb, 4);
+    linIdx               = sub2ind([Nc + Nb, 4], (1:Nc+Nb)', classIdxAll);
+    bcOneHot(linIdx)     = 1;
+
+    xExtent = max(xHi - xLo, eps);
+    dist_to_loaded = (xHi - xy_aug(:, 1)) / xExtent;   % 0 at right, 1 at left
+
+    gnn_data.x                    = [xy_aug, radius_aug, bcOneHot, dist_to_loaded];  % N×8
+    gnn_data.edge_index           = int32(ei_aug);
+    gnn_data.num_nodes            = Nc + Nb;
+    gnn_data.edge_attr            = single(edge_attr_aug);
+    gnn_data.schema_version       = 5;
+    gnn_data.schema_version_label = 'V3';
+
+otherwise   % 'V1'
     boundaryFlag = double(~cls_interior);
     gnn_data.x = [structuralGraph.node_coords, structuralGraph.node_radius, boundaryFlag];  % N×4
     gnn_data.schema_version       = 3;
     gnn_data.schema_version_label = 'V1';
 end
 
-dense_data = rasterize_full_reference_graph(fullGraph, 128);
-
 save(sampleMatPath, 'gnn_data', 'dense_data', '-v7');
+end
+
+function edge_attr = build_v2_edge_attr(ei, xy, radius)
+% Per-edge 5-dim feature: [L, unit_dir_x, unit_dir_y, mean_r, |dr|], using
+% the (rn - rm) convention where ei(1,:) = n, ei(2,:) = m.
+E = size(ei, 2);
+if E == 0
+    edge_attr = zeros(0, 5);
+    return;
+end
+rn   = xy(ei(1,:), :);
+rm   = xy(ei(2,:), :);
+diff = rn - rm;
+L    = sqrt(sum(diff.^2, 2));
+Lsf  = max(L, 1e-12);
+unitDir = diff ./ Lsf;
+rn_r = radius(ei(1,:));
+rm_r = radius(ei(2,:));
+mean_r = (rn_r + rm_r) / 2;
+abs_dr = abs(rn_r - rm_r);
+edge_attr = [L, unitDir, mean_r, abs_dr];   % E×5
+end
+
+function [newXY, newCls, newParent, relabelIdx, relabelCls] = ...
+        compute_v3_boundary_augmentation(xy, dense_data)
+% Per-wall raster-boundary augmentation.
+%   For each wall (left/clamp, right/load, bot/free, top/free):
+%     - gather occupied perimeter pixels on that wall
+%     - find each pixel's nearest centerline node
+%     - group pixels by parent node
+%     - k>=2 groups (perpendicular contact): emit ONE new boundary node
+%       at the group centroid with a single edge to the parent
+%     - k==1 groups (parallel contact): no new node, queue the parent
+%       for relabeling with the wall's class
+% Returns:
+%   newXY     Nnew x 2  new boundary node xy
+%   newCls    Nnew x 1  class code per new node {2=clamp, 3=load, 4=free}
+%   newParent Nnew x 1  centerline node each new node attaches to
+%   relabelIdx, relabelCls  pairs of (c, new class) to apply with priority
+%                           (clamp 2 < load 3 < free 4).
+occ = logical(dense_data.raster(:, :, 1));
+[H, W] = size(occ);
+xLo = dense_data.xy_bounds(1); xHi = dense_data.xy_bounds(2);
+yLo = dense_data.xy_bounds(3); yHi = dense_data.xy_bounds(4);
+dxPix = (xHi - xLo) / max(W - 1, 1);
+dyPix = (yHi - yLo) / max(H - 1, 1);
+relabelMaxDist = 1.5 * max(dxPix, dyPix);   % only relabel c if it sits on the wall
+
+walls = struct('xy', {}, 'cls', {});
+rL = find(occ(:, 1));
+if ~isempty(rL)
+    walls(end+1).xy = [repmat(xLo, numel(rL), 1), yLo + (rL - 1) * dyPix];
+    walls(end).cls  = 2;
+end
+rR = find(occ(:, W));
+if ~isempty(rR)
+    walls(end+1).xy = [repmat(xHi, numel(rR), 1), yLo + (rR - 1) * dyPix];
+    walls(end).cls  = 3;
+end
+cB = find(occ(1, :));
+if ~isempty(cB)
+    walls(end+1).xy = [xLo + (cB(:) - 1) * dxPix, repmat(yLo, numel(cB), 1)];
+    walls(end).cls  = 4;
+end
+cT = find(occ(H, :));
+if ~isempty(cT)
+    walls(end+1).xy = [xLo + (cT(:) - 1) * dxPix, repmat(yHi, numel(cT), 1)];
+    walls(end).cls  = 4;
+end
+
+newXY      = zeros(0, 2);
+newCls     = zeros(0, 1);
+newParent  = zeros(0, 1);
+relabelIdx = zeros(0, 1);
+relabelCls = zeros(0, 1);
+
+for w = 1:numel(walls)
+    pxy = walls(w).xy;
+    cls = walls(w).cls;
+    k   = size(pxy, 1);
+    parent = zeros(k, 1);
+    for p = 1:k
+        d2 = sum((xy - pxy(p, :)).^2, 2);
+        [~, parent(p)] = min(d2);
+    end
+    [uParent, ~, grp] = unique(parent);
+    for g = 1:numel(uParent)
+        sel = find(grp == g);
+        cIdx = uParent(g);
+        if numel(sel) >= 2
+            newXY(end+1, :)     = mean(pxy(sel, :), 1); %#ok<AGROW>
+            newCls(end+1, 1)    = cls;                  %#ok<AGROW>
+            newParent(end+1, 1) = cIdx;                 %#ok<AGROW>
+        else
+            % Singleton: only treat as parallel contact (relabel c) if c is
+            % actually on the wall. Otherwise emit a new boundary node at
+            % the pixel so we don't drag an interior class into the graph.
+            pPos = pxy(sel, :);
+            if norm(xy(cIdx, :) - pPos) <= relabelMaxDist
+                relabelIdx(end+1, 1) = cIdx;            %#ok<AGROW>
+                relabelCls(end+1, 1) = cls;             %#ok<AGROW>
+            else
+                newXY(end+1, :)     = pPos;             %#ok<AGROW>
+                newCls(end+1, 1)    = cls;              %#ok<AGROW>
+                newParent(end+1, 1) = cIdx;             %#ok<AGROW>
+            end
+        end
+    end
+end
 end
 
 function dense_data = rasterize_full_reference_graph(fullGraph, gridSize)
